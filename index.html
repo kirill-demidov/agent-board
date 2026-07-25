@@ -317,6 +317,8 @@
     position: relative; cursor: help;
     padding-left: 8px;
   }
+  /* какой это CLI — видно прямо на карточке, а не только в подсказке */
+  .acard-actions .meta > .agent-logo { width: 11px; height: 11px; opacity: 0.75; }
   .meta-tip {
     position: absolute; right: 0; bottom: calc(100% + 7px); z-index: 5;
     min-width: 148px; max-width: 250px;
@@ -823,6 +825,7 @@
       recentlyClosed: 'recently closed',
       loading: 'loading…', empty: 'empty',
       boardSkin: 'board skin', agents: 'agents', language: 'language',
+      appearance: 'appearance', light: 'light', dark: 'dark',
       terminal: 'Terminal',
       obHead: 'Welcome to Agent Board',
       obSub: 'Which agents should the board manage? Installed CLIs are pre-selected — you can change this later in settings.',
@@ -881,6 +884,7 @@
       recentlyClosed: 'недавно закрытые',
       loading: 'загружаю…', empty: 'пусто',
       boardSkin: 'скин доски', agents: 'агенты', language: 'язык',
+      appearance: 'оформление', light: 'светлое', dark: 'тёмное',
       terminal: 'Терминал',
       obHead: 'Добро пожаловать в Agent Board',
       obSub: 'Какими агентами управлять доске? Установленные CLI уже отмечены — позже это можно изменить в настройках.',
@@ -1175,7 +1179,7 @@
         : '<button class="primary" data-act="open">' + t('open') + '</button>' +
           '<button class="icon-sm" data-act="reply" title="' + t('replyTitle') + '">' +
           '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>') +
-      '<span class="meta">' +
+      '<span class="meta">' + agentIcon(agent) +
       '<span class="proj"></span><span class="st"></span>' +
       '<span class="meta-tip" aria-hidden="true">' + agentIcon(agent) +
       '<span class="meta-tip-copy"><span class="meta-tip-main"></span>' +
@@ -2062,6 +2066,20 @@
     localStorage.setItem('agentboard-skin', file || '');
   }
 
+  // светлое/тёмное оформление: класс на <html>, на него отвечают скины с ночным
+  // вариантом — пункт виден только при них (терминал тёмен по своей природе)
+  const APPEARANCE_SKINS = ['macos.css', 'soviet.css'];
+
+  function appearance() {
+    return localStorage.getItem('agentboard-appearance') ||
+      (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  }
+
+  function applyAppearance(mode) {
+    localStorage.setItem('agentboard-appearance', mode);
+    document.documentElement.classList.toggle('dark', mode === 'dark');
+  }
+
   function settingsMenu(x, y) {
     const cur = localStorage.getItem('agentboard-skin') || '';
     const all = [{ file: '', name: t('terminal') }, ...skinList];
@@ -2073,15 +2091,30 @@
     const provRows =
       '<button class="po-item po-flex" data-mw="1">' +
       '<span class="po-check"></span><span class="t">' + t('agentsModels') + '…</span></button>';
+    // светлое/тёмное — теми же строками с галочкой; пункт есть только у скинов с ночным видом
+    const mode = appearance();
+    const modes = [{ mode: 'light', name: t('light') }, { mode: 'dark', name: t('dark') }];
+    const appRows = modes.map(m =>
+      '<button class="po-item po-flex" data-app="' + m.mode + '">' +
+      '<span class="po-check">' + (m.mode === mode ? '✓' : '') + '</span>' +
+      '<span class="t">' + m.name + '</span></button>').join('');
+    const appBlock = APPEARANCE_SKINS.includes(cur)
+      ? '<div class="po-head">' + t('appearance') + '</div>' + appRows : '';
     // язык доски: те же строки-пункты с галочкой, что и у скинов; названия — эндонимы
     const langs = [{ code: 'en', name: 'English' }, { code: 'ru', name: 'Русский' }];
     const langRows = langs.map(l =>
       '<button class="po-item po-flex" data-lang="' + l.code + '">' +
       '<span class="po-check">' + (l.code === LANG ? '✓' : '') + '</span>' +
       '<span class="t">' + l.name + '</span></button>').join('');
-    showPopover(x, y, '<div class="po-head">' + t('boardSkin') + '</div>' + rows +
+    showPopover(x, y, '<div class="po-head">' + t('boardSkin') + '</div>' + rows + appBlock +
                       '<div class="po-head">' + t('agents') + '</div>' + provRows +
                       '<div class="po-head">' + t('language') + '</div>' + langRows);
+    popover.querySelectorAll('.po-item[data-app]').forEach(btn => {
+      btn.onclick = () => {
+        applyAppearance(btn.dataset.app);
+        settingsMenu(x, y);   // перерисовать с галочкой
+      };
+    });
     popover.querySelectorAll('.po-item[data-lang]').forEach(btn => {
       btn.onclick = () => {
         setLang(btn.dataset.lang);
@@ -2108,6 +2141,8 @@
   async function initSkins() {
     skinList = (await api('skins')) || [];
     applySkin(localStorage.getItem('agentboard-skin') || '');
+    // пока не выбрали руками — идём за системой, поэтому в память тут не пишем
+    document.documentElement.classList.toggle('dark', appearance() === 'dark');
   }
 
   applyLang();
