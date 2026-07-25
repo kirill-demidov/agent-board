@@ -83,10 +83,19 @@
   }
   .agent span { font-size: 12.5px; color: var(--dim); }
 
-  .rows { margin: 74px 0 0; border-top: 1px solid var(--line); }
-  .row { display: flex; gap: 24px; padding: 22px 0; border-bottom: 1px solid var(--line); }
-  .row b { flex: 0 0 176px; font-weight: 600; }
-  .row p { margin: 0; color: var(--dim); }
+  /* плитки матового стекла — тот же приём, что у карточек доски */
+  .rows { margin: 72px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .row {
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 16px; padding: 26px 26px 28px;
+    font-size: 19px; line-height: 1.5; letter-spacing: -0.01em;
+    backdrop-filter: blur(18px) saturate(1.4);
+    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  }
+  .row.wide { grid-column: 1 / -1; font-size: 22px; }
+  .row .m { color: var(--dim); }
+  .row .amber { color: #ff9f0a; }
 
   .install { margin: 48px 0 0; }
   .install p { color: var(--faint); font-size: 14px; margin: 0 0 10px; }
@@ -107,8 +116,8 @@
   @media (max-width: 620px) {
     h1 { font-size: 28px; }
     .tag { font-size: 17px; }
-    .row { flex-direction: column; gap: 6px; }
-    .row b { flex: none; }
+    .rows { grid-template-columns: 1fr; }
+    .row, .row.wide { font-size: 17px; padding: 20px; }
   }
   @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
 </style>
@@ -142,19 +151,12 @@
   </div>
 
   <section class="rows">
-    <div class="row"><b>Start one in a second</b>
-      <p>Pick a folder, type the task. The agent appears as a tile and works in the background —
-        no terminal window opens.</p></div>
-    <div class="row"><b>Arrange them your way</b>
-      <p>It is a canvas, not a list. Drag cards around, keep one project in front of you and the
-        rest out of the way.</p></div>
-    <div class="row"><b>Waiting for you</b>
-      <p>When an agent stops to ask, its card turns amber. You stop finding out forty minutes later.</p></div>
-    <div class="row"><b>Answer from the board</b>
-      <p>Reply straight from the card. Open the live terminal only when you actually want to watch.</p></div>
-    <div class="row"><b>Nothing piles up</b>
-      <p>Cards survive reboots and resume with one click, removing a card never deletes history —
-        and your desktop stays clean.</p></div>
+    <div class="row wide">Start an agent in a second — it runs in the background,
+      <span class="m">no terminal window opens.</span></div>
+    <div class="row">It is a canvas, not a list. <span class="m">Drag the cards wherever they make sense.</span></div>
+    <div class="row">A card turns <span class="amber">amber</span> the moment an agent needs you.</div>
+    <div class="row">Reply straight from the card. <span class="m">Open the terminal only to watch.</span></div>
+    <div class="row">Cards survive reboots. <span class="m">Your desktop stays clean.</span></div>
   </section>
 
   <div class="install">
