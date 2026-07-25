@@ -681,6 +681,28 @@ def session_records():
     return recs
 
 
+bg_cmd_cache = {}  # pid -> командная строка (распознавание bg-форков)
+
+
+def bg_fork_of(rec, sid):
+    """Фоновый форк (Agent View / remote control), продолжающий разговор sid.
+    Демон клода запускает его как `claude --fork-session --resume <файл sid>`;
+    записи в самом форке переписаны на новый sid, так что родословная видна
+    только в командной строке живого процесса."""
+    if rec.get("kind") != "bg" or not sid:
+        return False
+    pid = str(rec.get("pid", ""))
+    cmd = bg_cmd_cache.get(pid)
+    if cmd is None:
+        try:
+            cmd = subprocess.run(["ps", "-o", "command=", "-p", pid],
+                                 capture_output=True, text=True, timeout=5).stdout
+        except Exception:
+            cmd = ""
+        bg_cmd_cache[pid] = cmd
+    return "--fork-session" in cmd and sid in cmd
+
+
 def pane_pids(name):
     """PID процессов внутри tmux-сессии (панель + два уровня детей)."""
     pids = [p.strip() for p in
@@ -773,15 +795,14 @@ def cached_meta(path):
 
 
 def newest_session(cwd, after=0, exclude=()):
-    """Свежайший разговор проекта, начатый/тронутый после момента after."""
+    """Свежайший разговор проекта: по времени последнего сообщения после момента
+    after. Не по mtime файла — клод дописывает сервисные записи (ai-title,
+    bridge-session, last-prompt) в старые файлы и делает мёртвые «свежими»."""
     best, best_m = None, 0
     for p in glob.glob(os.path.join(PROJECTS_DIR, sanitize(cwd), "*.jsonl")):
         if os.path.basename(p)[:-6] in exclude:
             continue
-        try:
-            m = os.stat(p).st_mtime
-        except OSError:
-            continue
+        m = log_activity(p, ("user", "assistant"))
         if m >= after - 60 and m > best_m:
             best, best_m = p, m
     if not best:
@@ -929,20 +950,31 @@ def turn_preview(cwd, sid, include_trailing=True):
 
 
 CODEX_SESS = os.path.expanduser("~/.codex/sessions")
-codex_cwd_cache = {}  # путь rollout -> cwd из session_meta
+codex_meta_cache = {}  # путь rollout -> (cwd, fork) из session_meta
 
 
-def codex_meta_cwd(path):
-    if path in codex_cwd_cache:
-        return codex_cwd_cache[path]
-    cwd = ""
+def codex_meta(path):
+    """cwd + признак саб-агентского форка (codex ≥0.144 пишет рядом rollout'ы
+    subagent-тредов с тем же cwd — карточке они не принадлежат)."""
+    if path in codex_meta_cache:
+        return codex_meta_cache[path]
+    cwd, fork = "", False
     try:
         with open(path, errors="ignore") as f:
-            cwd = json.loads(f.readline()).get("payload", {}).get("cwd", "")
+            payload = json.loads(f.readline()).get("payload", {})
+        cwd = payload.get("cwd", "")
+        fork = bool(payload.get("parent_thread_id")) \
+            or payload.get("thread_source") == "subagent"
     except Exception:
         pass
-    codex_cwd_cache[path] = cwd
-    return cwd
+    codex_meta_cache[path] = (cwd, fork)
+    return cwd, fork
+
+
+def codex_id(ro):
+    """Id разговора codex — uuid в имени rollout-файла (им же берёт `codex resume`)."""
+    m = re.search(r"([0-9a-f-]{36})\.jsonl$", ro)
+    return m.group(1) if m else ""
 
 
 def codex_rollout(cwd, created, exclude=()):
@@ -957,7 +989,8 @@ def codex_rollout(cwd, created, exclude=()):
             continue
         if m < created - 60 or m <= best_m:
             continue
-        if codex_meta_cwd(path) == cwd:
+        p_cwd, fork = codex_meta(path)
+        if p_cwd == cwd and not fork:
             best, best_m = path, m
     return best
 
@@ -1019,17 +1052,25 @@ def codex_turn_preview(path):
             items.append(("tool", f"{name}({detail or '…'})"))
     start = None
     for i, (role, text) in enumerate(items):
-        if role == "user" and text.strip() and not text.lstrip().startswith("<"):
+        # scaffold-сообщения codex ≥0.144 идут с ролью user — они не реплика
+        if role == "user" and text.strip() \
+                and not text.lstrip().startswith(("<", "# AGENTS.md")):
             start = i
     if start is None:
-        preview_cache[path] = (mtime, "", "")
-        return ""
-    out = ["> " + " ".join(NAME_RE.sub("", items[start][1]).split())[:500]]
-    for role, text in items[start + 1:]:
+        # длинный тур: реплика юзера уехала за 400КБ-окно — показываем хвост работы
+        out = []
+        tail = items
+    else:
+        out = ["> " + " ".join(NAME_RE.sub("", items[start][1]).split())[:500]]
+        tail = items[start + 1:]
+    for role, text in tail:
         if role == "assistant" and text.strip():
             out.append(text.strip())
         elif role == "tool":
             out.append("⏺ " + text)
+    if not out:
+        preview_cache[path] = (mtime, "")
+        return ""
     text = "\n\n".join(out)
     text = "\n".join(text.splitlines()[-500:])
     preview_cache[path] = (mtime, text)
@@ -1228,8 +1269,12 @@ def find_log(agent, cwd, created, exclude):
 def log_valid(agent, ro):
     if not ro:
         return False
-    return bool(_opencode_q("SELECT 1 FROM session WHERE id = ?", (ro,))) \
-        if agent == "opencode" else os.path.isfile(ro)
+    if agent == "opencode":
+        return bool(_opencode_q("SELECT 1 FROM session WHERE id = ?", (ro,)))
+    if agent == "codex":
+        # привязанный когда-то форк саб-агента отпускаем — карточка перепривяжется
+        return os.path.isfile(ro) and not codex_meta(ro)[1]
+    return os.path.isfile(ro)
 
 
 def log_stamp(agent, ro):
@@ -1306,8 +1351,11 @@ def get_live():
             status = "waiting"
         elif now - rec["changed"] < 10:
             status = "working"
-        elif hook == "working" and now - rec["changed"] < 120:
-            status = "working"  # хук сказал "работает", панель тихая — верим ещё 2 минуты
+        elif hook == "working" and now - hook_at < 900 and now - rec["changed"] < 120:
+            # хук сказал "работает", панель тихая — верим ещё 2 минуты. Но не
+            # старому файлу: Stop из фоновых форков (Agent View) не приходит
+            # (нет $TMUX), и «working» может висеть часами
+            status = "working"
         else:
             status = "idle"
 
@@ -1320,6 +1368,9 @@ def get_live():
             "status": status,
             "preview": preview,
             "activity": int(created or 0),
+            # когда «ждёт» сказал хук — момент вопроса; нужен ниже, чтобы
+            # отлеплять протухший waiting по активности структурного лога
+            "hook_at": hook_at if hook == "waiting" else 0,
         })
     update_caffeinate(any(a["status"] == "working" for a in agents))
     return agents
@@ -1399,10 +1450,9 @@ def get_agents():
         a["agent"] = card.get("agent", "claude")
         a["model"] = model_label(card.get("model", ""))
         if a["agent"] != "claude":
-            # у codex/cursor/opencode нет claude-сессий — не привязываем разговор
+            # claude-сессии у не-клодов нет; id разговора есть только у codex (ниже)
             a["cid"] = ""
             a["sname"] = ""
-            a["label"] = card.get("label", "")
             a["logo"] = logo_version(a["path"])
             ro = card.get("rollout", "")
             if not log_valid(a["agent"], ro):
@@ -1412,8 +1462,18 @@ def get_agents():
                 if ro:
                     card["rollout"] = ro
                     changed = True
+            # codex умеет `codex resume <uuid>` — даём карточке id разговора,
+            # на нём держатся имя, «недавно закрытые» и возобновление
+            if a["agent"] == "codex" and ro:
+                cid = codex_id(ro)
+                if cid and cid != card.get("id"):
+                    card["id"] = cid
+                    changed = True
+                a["cid"] = card.get("id", "")
+            a["label"] = card.get("label") or board["labels"].get(a["cid"], "")
             # превью — только из структурного лога: в пейне на старте
             # прокручивается служебный шум (MCP, лимиты), в логе его нет
+            pane_preview = a["preview"]
             a["preview"] = ""
             if ro:
                 a["activity"] = log_stamp(a["agent"], ro) or a["activity"]
@@ -1424,6 +1484,18 @@ def get_agents():
                         card["model"] = found_model
                         changed = True
                 a["preview"] = log_preview(a["agent"], ro)
+                # протухший «ждёт»: лог живёт после вопроса хука — значит,
+                # уже ответили (спиннер TUI не даёт пейн-эвристике отлепить)
+                if a["status"] == "waiting" and a["hook_at"] \
+                        and a["activity"] > a["hook_at"] + 5:
+                    a["status"] = "working"
+            elif a["agent"] == "codex" and time.time() - a["created"] > 15:
+                # codex за 15 секунд не создал rollout — стоит на стартовом
+                # диалоге (trust/hooks/login): де-факто «ждёт тебя», а не
+                # «запускается». Сигнал структурный, пейн — только для показа.
+                a["status"] = "waiting"
+                lines = [l.strip() for l in pane_preview.splitlines() if l.strip()]
+                a["preview"] = "\n".join(lines[-10:])
             continue
         # точная привязка: PID процесса claude внутри панели -> sessionId
         pids = pane_pids(a["name"])
@@ -1439,15 +1511,19 @@ def get_agents():
                  {c["id"] for c in board["closed"] if c.get("id")})
         # id чужих карточек появляются с задержкой (свежая сессия ещё без id),
         # а pid-файлы пишутся мгновенно: сессию, на которую претендует любой
-        # другой живой pid, не заглатываем. Форков в pid-файлах не бывает
-        # (они там не обновляются — в этом и был баг), так что форк подхватится.
+        # другой живой pid, не заглатываем. Исключение — bg-форк нашего же
+        # разговора (Agent View): это не чужая карточка, а его продолжение.
+        # Форков в pid-файлах не бывает (они там не обновляются — в этом и был
+        # баг), так что форк подхватится.
         known |= {r["sessionId"] for r in recs
-                  if r.get("sessionId") and str(r.get("pid")) not in pids}
+                  if r.get("sessionId") and str(r.get("pid")) not in pids
+                  and not bg_fork_of(r, sid)}
         cand, _ = newest_session(a["path"], a["created"], known)
         if cand and cand != sid:
             cur_f = find_session_file(a["path"], sid) if sid else ""
-            cur_m = os.path.getmtime(cur_f) if cur_f and os.path.isfile(cur_f) else 0
-            if os.path.getmtime(find_session_file(a["path"], cand)) > cur_m:
+            cur_m = log_activity(cur_f, ("user", "assistant")) if cur_f else 0
+            if log_activity(find_session_file(a["path"], cand),
+                            ("user", "assistant")) > cur_m:
                 sid = cand
         if sid and sid != card["id"]:
             card["id"] = sid
@@ -1483,10 +1559,15 @@ def get_agents():
             cards_list.remove(card)  # умерла, не успев поговорить — нечего возобновлять
             changed = True
             continue
-        session_path = find_session_file(card["cwd"], card["id"])
-        activity = log_activity(session_path, ("user", "assistant"))
-        raw_model = (card.get("model") or
-                     log_model(session_path, "claude"))
+        agent = card.get("agent", "claude")
+        if agent == "claude":
+            session_path = find_session_file(card["cwd"], card["id"])
+            activity = log_activity(session_path, ("user", "assistant"))
+            raw_model = card.get("model") or log_model(session_path, "claude")
+        else:  # у не-клодов разговор живёт в своём логе (id есть только у codex)
+            ro = card.get("rollout", "")
+            activity = log_stamp(agent, ro) if ro else 0
+            raw_model = card.get("model") or (log_model_of(agent, ro) if ro else "")
         if raw_model and not card.get("model"):
             card["model"] = raw_model
             changed = True
@@ -1499,7 +1580,7 @@ def get_agents():
             "project": card["project"],
             "path": card["cwd"],
             "attached": False,
-            "agent": card.get("agent", "claude"),
+            "agent": agent,
             "model": model_label(raw_model),
             "status": "parked",
             "preview": card["title"] or "untitled conversation",
@@ -1703,8 +1784,12 @@ def resume_card(cid):
     if not card:
         return False
     name = free_name(card["project"])
+    if card.get("agent") == "codex":
+        cmd = f"{CODEX} resume {shlex.quote(cid)}"
+    else:
+        cmd = f"{CLAUDE} --resume {shlex.quote(cid)}"
     tmux("new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", card["cwd"],
-         f"export PATH={shlex.quote(AGENT_PATH)}; {CLAUDE} --resume {cid}")
+         f"export PATH={shlex.quote(AGENT_PATH)}; {cmd}")
     tmux("set-option", "-t", name, "mouse", "on")
     tmux("set-option", "-t", name, "mode-style", "bg=colour236,fg=colour245")
     card["tmux"] = name
@@ -1716,11 +1801,17 @@ def resume_card(cid):
 @locked
 def add_from_history(cid, cwd, project, title):
     board = load_board()
+    # у закрытой карточки не-клода помним движок и лог — иначе вернётся «клодом»
+    old = next((c for c in board["closed"] if c.get("id") == cid), None)
     board["cards"] = [c for c in board["cards"] if c.get("id") != cid]
     board["closed"] = [c for c in board["closed"] if c.get("id") != cid]
-    board["cards"].append({"id": cid, "cwd": cwd, "project": project,
-                           "title": title, "tmux": "",
-                           "label": board["labels"].get(cid, "")})
+    card = {"id": cid, "cwd": cwd, "project": project,
+            "title": title, "tmux": "",
+            "label": board["labels"].get(cid, "")}
+    if old and old.get("agent", "claude") != "claude":
+        card["agent"] = old["agent"]
+        card["rollout"] = old.get("rollout", "")
+    board["cards"].append(card)
     if project not in {w["project"] for w in board["workspaces"]}:
         board["workspaces"].append({"project": project, "cwd": cwd})
     save_board(board)
@@ -1930,6 +2021,8 @@ def remove_card(tname, cid):
             board["closed"].insert(0, {"id": c["id"], "cwd": c["cwd"],
                                        "project": c["project"],
                                        "title": c.get("title", ""),
+                                       "agent": c.get("agent", "claude"),
+                                       "rollout": c.get("rollout", ""),
                                        "ts": int(time.time())})
     board["closed"] = board["closed"][:10]
     save_board(board)
