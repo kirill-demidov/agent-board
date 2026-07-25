@@ -37,8 +37,35 @@
     border-bottom: 1px solid #243028;
     font-size: 13px;
   }
-  .topbar b { color: #e2ece5; letter-spacing: 0.02em; }
+  .topbar b {
+    color: #e2ece5; letter-spacing: 0.02em;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 13px; font-weight: 600;
+  }
+  /* курсор у логотипа: ровно горит в покое, мигает — только пока кто-то работает */
+  .caret {
+    display: inline-block; width: 7px; height: 13px; margin-left: 4px;
+    border-radius: 1px; background: var(--acc);
+    vertical-align: -2px;
+  }
+  .topbar.busy .caret { animation: caretBlink 1.4s steps(1) infinite; }
+  @keyframes caretBlink { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0.15; } }
   .topbar .sp { flex: 1; }
+  /* спектр состояния доски: стекло шапки делится на цветовые поля
+     пропорционально составу (--split ставит js); слой ::before, чтобы
+     не трогать фон шапки — скины красят его под себя */
+  .topbar::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+  }
+  .topbar.st-work::before {
+    background: linear-gradient(90deg,
+      rgba(91,217,138,0.10) 0%, rgba(91,217,138,0.07) 70%, rgba(91,217,138,0) 100%);
+  }
+  .topbar.st-mix::before {
+    background: linear-gradient(90deg,
+      rgba(91,217,138,0.09) 0%, rgba(91,217,138,0.08) calc(var(--split, 66%) - 6%),
+      rgba(232,180,75,0.18) calc(var(--split, 66%) + 4%), rgba(232,180,75,0.14) 100%);
+  }
   .ver { color: #3f4c45; font-size: 11px; }
   /* чипы-папки: серые, пока не выбраны; прячутся, если проект один */
   .chips { display: flex; align-items: center; gap: 2px; }
@@ -90,6 +117,35 @@
     width: 28px; height: 28px; padding: 0; border-radius: 50%;
   }
   .icon-btn svg { display: block; }
+  /* иконки топбара — плоские призраки: подложка только под курсором */
+  .top-btn.ghost.icon-btn {
+    background: transparent; border-color: transparent;
+    border-radius: 8px; color: #8fa398;
+  }
+  .top-btn.ghost.icon-btn:hover { background: #1c2a22; color: #e2ece5; }
+  /* статусы — тихие точки с числом: историю рассказывает спектр в стекле */
+  .gbadge, .wbadge:not(.hooksbar) { background: transparent; border-color: transparent; }
+  .wbadge:not(.hooksbar) { animation: none; }
+  /* «＋ agent»: кнопка-константа; оправа вспыхивает только как отклик —
+     под курсором и пока агент рождается (js вешает .init) */
+  #topPlus { position: relative; display: inline-flex; align-items: center; gap: 5px; }
+  #topPlus .plus-ico { display: block; }
+  #topPlus::before {
+    content: ""; position: absolute; inset: -2.5px; border-radius: 99px; z-index: -1;
+    background: var(--acc);
+    opacity: 0; transition: opacity 0.3s ease;
+  }
+  #topPlus:hover::before, #topPlus.init::before { opacity: 1; }
+  #topPlus:hover, #topPlus.init { box-shadow: 0 0 14px var(--flash); }
+  /* инит: плюс сворачивается в крутящееся зерно */
+  #topPlus .seed { display: none; width: 9px; height: 9px; border-radius: 50%; }
+  #topPlus.init .plus-ico { display: none; }
+  #topPlus.init .seed {
+    display: inline-block;
+    background: conic-gradient(var(--acc), transparent 65%, var(--acc));
+    animation: seedSpin 1.1s linear infinite;
+  }
+  @keyframes seedSpin { to { transform: rotate(360deg); } }
   #popover .po-check { flex: none; width: 14px; color: #5bd98a; }
   #popover .po-agents { gap: 6px; }
   #popover .agent-pick.active {
@@ -206,6 +262,7 @@
     .wbadge { animation: none; }
     .acard.born, .acard.born::after, .umsg.grow, .st.rip, .ldr i, .acard-body.fresh { animation: none; }
     .gmsg, .acard-body .old { transition: none; }
+    .caret, #topPlus::before, #topPlus .seed { animation: none !important; }
   }
 
   .hlogo {
@@ -669,7 +726,7 @@
 </head>
 <body>
   <div class="topbar">
-    <b>Agent Board</b>
+    <b>agentboard<i class="caret"></i></b>
     <span class="chips" id="chips"></span>
     <span id="stale" hidden style="color:#e8b44b;font-size:12px;font-weight:600">page is stale — press Cmd+R</span>
     <span class="sp"></span>
@@ -684,7 +741,7 @@
     </span>
     <span class="gbadge" id="gbadge" hidden><i class="gdot"></i><span id="gbadgeText"></span></span>
     <span class="wbadge" id="wbadge" hidden><i class="wdot"></i><span id="wbadgeText"></span></span>
-    <button class="top-btn" id="topPlus">＋ agent</button>
+    <button class="top-btn" id="topPlus"><svg class="plus-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><i class="seed"></i><span id="topPlusLabel">agent</span></button>
     <button class="top-btn ghost icon-btn" id="topHist" title="revive an agent from history">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.3"/><polyline points="3 3 3 7.5 7.5 7.5"/><polyline points="12 7 12 12 15.5 14"/></svg>
     </button>
@@ -731,7 +788,7 @@
       hooksFix: 'enable hooks',
       hooksDone: 'done — restart live agent sessions',
       hooksFailed: 'failed: a config cannot be read, see README',
-      newAgent: '＋ agent',
+      newAgent: 'agent',
       histTitle: 'revive an agent from history',
       settingsTitle: 'settings',
       boardEmpty: 'The board is empty.<br>Hit <code>＋ agent</code> — pick a project, describe a task; the agent appears as a tile<br>and blinks when it finishes or asks you something.',
@@ -789,7 +846,7 @@
       hooksFix: 'включить хуки',
       hooksDone: 'готово — перезапусти сессии агентов',
       hooksFailed: 'не вышло: конфиг не читается, смотри README',
-      newAgent: '＋ агент',
+      newAgent: 'агент',
       histTitle: 'воскресить агента из истории',
       settingsTitle: 'настройки',
       boardEmpty: 'Доска пустая.<br>Жми <code>＋ агент</code> — выбери проект, напиши задачу, агент появится плиткой<br>и замигает, когда закончит или спросит.',
@@ -855,7 +912,7 @@
       set('hooksbarText', 'textContent', t('hooksText'));
       set('hooksFix', 'textContent', t('hooksFix'));
     }
-    set('topPlus', 'textContent', t('newAgent'));
+    set('topPlusLabel', 'textContent', t('newAgent'));
     set('topHist', 'title', t('histTitle'));
     set('topSettings', 'title', t('settingsTitle'));
     const emptyBox = document.querySelector('#empty > div');
@@ -1084,6 +1141,14 @@
     if (booted) {
       el.classList.add('born');
       setTimeout(() => el.classList.remove('born'), 1300);
+      // агент родился — гасим оправу на «＋ agent», додержав её до ~секунды:
+      // градиент должен успеть «перетечь» из кнопки в карточку на глазах
+      const tp = document.getElementById('topPlus');
+      if (tp.classList.contains('init')) {
+        const hold = Math.max(0, 1600 - (Date.now() - (+tp.dataset.initAt || 0)));
+        clearTimeout(tp._initT);
+        tp._initT = setTimeout(() => tp.classList.remove('init'), hold);
+      }
     }
     return el;
   }
@@ -1566,6 +1631,13 @@
       async function create() {
         const prompt = ta.value.trim();
         hidePopover();
+        // оправа горит, пока tmux-сессия поднимается; makeCard погасит,
+        // но не раньше, чем через ~секунду — иначе вспышку не успеть увидеть
+        const tp = document.getElementById('topPlus');
+        tp.classList.add('init');
+        tp.dataset.initAt = Date.now();
+        clearTimeout(tp._initT);
+        tp._initT = setTimeout(() => tp.classList.remove('init'), 15000);
         await api('new?cwd=' + encodeURIComponent(p.cwd) +
                   '&project=' + encodeURIComponent(p.project) +
                   '&agent=' + st.eng +
@@ -1963,6 +2035,12 @@
     wb.hidden = !q;
     wb.title = t('stNeedsYou');
     document.getElementById('wbadgeText').textContent = q;
+    // спектр в стекле шапки: пропорция зелёного/янтарного = состав доски
+    const tb = document.querySelector('.topbar');
+    tb.classList.toggle('st-work', w > 0 && !q);
+    tb.classList.toggle('st-mix', q > 0);
+    tb.classList.toggle('busy', w > 0);   // курсор в лого мигает, только пока кто-то работает
+    if (w + q) tb.style.setProperty('--split', Math.round(100 * w / (w + q)) + '%');
     document.title = (q ? '(' + q + ') ' : '') + 'Agent Board';
     if (navigator.setAppBadge) {
       q ? navigator.setAppBadge(q) : navigator.clearAppBadge();

@@ -333,3 +333,73 @@ body::before {
   --ldr: #86868b;
 }
 .gmsg { color: #3a6ea5; background: rgba(10, 132, 255, 0.1); border-left-color: #0a84ff; }
+
+/* ---------- шапка: спектр в стекле, чернильная кнопка, оправа-отклик ---------- */
+.topbar b { color: #1d1d1f; font-weight: 600; }
+.caret { background: #1d1d1f; }
+
+/* спектр состояния: пропорция зелёного/янтарного = состав доски */
+.topbar.st-work::before {
+  background: linear-gradient(90deg,
+    rgba(52,199,89,0.16) 0%, rgba(52,199,89,0.12) 70%, rgba(52,199,89,0) 100%);
+}
+.topbar.st-mix::before {
+  background: linear-gradient(90deg,
+    rgba(52,199,89,0.15) 0%, rgba(52,199,89,0.13) calc(var(--split, 66%) - 6%),
+    rgba(255,159,10,0.2) calc(var(--split, 66%) + 4%), rgba(255,159,10,0.16) 100%);
+}
+
+/* чипы проектов: тихий текст, активный — мягкая плашка */
+.chip { color: #7c7c82; }
+.chip:hover { color: #1d1d1f; background: rgba(0,0,0,0.045); }
+.chip.on { color: #1d1d1f; background: rgba(0,0,0,0.055); border-color: transparent; }
+.chip .c, .chip.on .c { color: #a1a1a6; }
+
+/* иконки топбара: плоские, подложка появляется на ховере */
+.top-btn.ghost.icon-btn {
+  background: transparent; border-color: transparent; box-shadow: none;
+  border-radius: 8px; color: #8e8e93;
+}
+.top-btn.ghost.icon-btn:hover { background: rgba(0,0,0,0.05); color: #1d1d1f; }
+
+/* статусы: тихие точки с числом — спектр уже рассказывает историю */
+.gbadge { color: #1d7a3e; background: transparent; border-color: transparent; }
+.gbadge .gdot { background: #34c759; }
+.wbadge:not(.hooksbar) {
+  color: #9a6200; background: transparent; border-color: transparent;
+  animation: none;
+}
+.wbadge:not(.hooksbar) .wdot { background: #ff9f0a; }
+
+/* «＋ agent»: чернильная капсула; оправа переливается под курсором и при ините */
+#topPlus {
+  background: #16181d; color: #fff; border: 0;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14);
+}
+#topPlus:hover { background: #24262c; }
+#topPlus::before {
+  background: conic-gradient(from 210deg, #7aa8ff, #b48cff, #ff9fc7, #ffd7a8, #8fd8e8, #7aa8ff);
+  animation: abShimmer 7s linear infinite;
+}
+#topPlus:hover, #topPlus.init {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), 0 2px 14px rgba(140,120,255,0.45);
+}
+#topPlus .seed { background: conic-gradient(#7aa8ff, #ff9fc7, #ffd7a8, #7aa8ff); }
+@keyframes abShimmer { to { filter: hue-rotate(360deg); } }
+
+/* рождение карточки: градиент кнопки передаётся ореолу и тает */
+.acard.born::after { animation-name: landFlashMac; }
+@keyframes landFlashMac {
+  0% {
+    box-shadow:
+      inset 0 0 0 1px rgba(180,140,255,0.75),
+      0 0 24px rgba(122,168,255,0.6),
+      0 0 44px rgba(255,159,199,0.45);
+  }
+  100% {
+    box-shadow:
+      inset 0 0 0 1px transparent,
+      0 0 0 transparent,
+      0 0 0 transparent;
+  }
+}
