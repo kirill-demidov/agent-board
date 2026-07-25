@@ -1,6 +1,6 @@
 # Agent Board
 
-**One board for Claude Code, Codex, Cursor and opencode.** One card is one
+**Spatial board for Claude Code, Codex, Cursor and opencode.** One card is one
 conversation: start agents into any project folder, drag the cards wherever they
 make sense, and see at a glance who is working, who finished, and who is waiting
 for you.
