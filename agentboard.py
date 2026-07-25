@@ -27,7 +27,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 PORT = int(os.environ.get("AGENTBOARD_PORT", "8787"))
 # бандл-версия (.app) приносит свой tmux и живёт на своём сокете,
@@ -885,10 +885,10 @@ def turn_preview(cwd, sid, include_trailing=True):
     def tool_sig(item):
         # "Bash(tee /tmp/…)" — как в TUI; фронт красит строки "⏺ Имя(…)"
         name = item.get("name", "tool")
-        if name.startswith("mcp__"):
+        parts = name.split("__", 2)
+        if name.startswith("mcp__") and len(parts) == 3:
             # mcp__claude_ai_Pushkin__list_files -> "Pushkin: list_files"
-            _, server, tool = name.split("__", 2)
-            name = f"{server.split('_')[-1]}: {tool}"
+            name = f"{parts[1].split('_')[-1]}: {parts[2]}"
         inp = item.get("input") or {}
         detail = (inp.get("command") or inp.get("file_path") or inp.get("path")
                   or inp.get("pattern") or inp.get("description") or "")
@@ -1389,15 +1389,25 @@ def get_agents():
         board["providers"] = detected_agents()
         changed = True
 
-    # дедупликация: один разговор — одна карточка
-    seen = set()
+    # дедупликация: один разговор — одна карточка. Из двух держим ту, у которой
+    # живой терминал, а имя переносим: раньше выживала просто первая в списке —
+    # самоназванная карточка молча теряла имя, а живая пересоздавалась каждый опрос
+    live_names = {a["name"] for a in live}
+    seen = {}
     for card in list(cards_list):
         key = card.get("id") or ("tmux:" + card.get("tmux", ""))
-        if key in seen:
-            cards_list.remove(card)
-            changed = True
-        else:
-            seen.add(key)
+        first = seen.get(key)
+        if first is None:
+            seen[key] = card
+            continue
+        alive = card.get("tmux") in live_names and first.get("tmux") not in live_names
+        keep, drop = (card, first) if alive else (first, card)
+        keep["label"] = keep.get("label") or drop.get("label", "")
+        if keep.get("id") and keep["label"]:
+            board["labels"][keep["id"]] = keep["label"]
+        seen[key] = keep
+        cards_list.remove(drop)
+        changed = True
 
     by_tmux = {c.get("tmux"): c for c in cards_list if c.get("tmux")}
     ws_projects = {w["project"] for w in board["workspaces"]}
@@ -1542,12 +1552,14 @@ def get_agents():
                 if not card.get("model"):
                     card["model"] = found_model
                     changed = True
-            tp = turn_preview(card["cwd"], card["id"],
-                              a["status"] in ("working", "waiting"))
+            try:  # кривой лог одной карточки не должен ронять всю доску
+                tp = turn_preview(card["cwd"], card["id"],
+                                  a["status"] in ("working", "waiting"))
+            except Exception:
+                tp = ""
             if tp:
                 a["preview"] = tp
 
-    live_names = {a["name"] for a in live}
     agents = live
     for card in list(cards_list):
         if card.get("tmux") in live_names:
@@ -1783,6 +1795,11 @@ def resume_card(cid):
     card = next((c for c in board["cards"] if c.get("id") == cid), None)
     if not card:
         return False
+    # разговор уже открыт — просто показываем его терминал. Второй CLI на тот же
+    # лог дал бы два процесса, пишущих в один транскрипт, и вторую карточку
+    if card.get("tmux") and tmux_ok("has-session", "-t", card["tmux"]):
+        open_in_terminal(card["tmux"])
+        return True
     name = free_name(card["project"])
     if card.get("agent") == "codex":
         cmd = f"{CODEX} resume {shlex.quote(cid)}"
