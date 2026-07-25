@@ -1,21 +1,28 @@
 # Agent Board
 
-A spatial board for your AI coding agents (Miro-style): one card = one conversation.
-Agents run in tmux underneath; drag cards around, group them by project, see at a
-glance who is working, who finished, and who is waiting for your reply.
+**One board for Claude Code, Codex, Cursor and opencode.** One card is one
+conversation: start agents into any project folder, drag the cards wherever they
+make sense, and see at a glance who is working, who finished, and who is waiting
+for you.
 
-Supported today: **Claude Code**, **Codex CLI**, **Cursor CLI**, and **opencode**.
+![Agent Board — launching agents, statuses, replying from the board](docs/demo.gif)
 
-- **＋ agent** — pick a project folder, type a task → the agent starts as a tile
-  and works in the background, no terminal window. When the card blinks yellow,
-  it needs you: click to open the live terminal right on the board.
-- Cards survive reboots: a live agent becomes "paused" and can be resumed
-  (`claude --resume`) with one click.
-- Removing a card never deletes the underlying conversation history.
-- Three skins: terminal (phosphor glow), macOS glass, and a Soviet retro console.
+**[Download AgentBoard.dmg](https://github.com/mikky-a/agentboard/releases/latest/download/AgentBoard.dmg)** ·
+[agentboard site](https://mikky-a.github.io/agentboard/) · macOS 13+ · MIT
 
-macOS only for now (uses tmux, AppleScript and a Swift/WKWebView wrapper).
-The UI speaks English and Russian (auto-detected, switchable in settings).
+- **Start an agent in a second** — pick a folder, type the task. It runs in the
+  background as a tile; no terminal window opens.
+- **A card turns amber the moment an agent needs you** — the header counts how
+  many are waiting, so you stop finding out forty minutes later.
+- **Answer from the board** — reply straight from the card; open the live
+  terminal only when you want to watch.
+- **Nothing piles up** — cards survive reboots and resume with one click,
+  removing a card never deletes history, and your desktop stays clean.
+- **Three skins** — terminal phosphor, macOS glass, Soviet retro console, each
+  with a night mode.
+
+Everything runs locally: the board reads the CLIs' own logs and talks to tmux on
+your machine. No account, no telemetry. The UI speaks English and Russian.
 
 ## Requirements
 
