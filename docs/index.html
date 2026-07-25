@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Board — one board for your AI coding agents</title>
+<meta name="description" content="A spatial board for Claude Code, Codex, Cursor and opencode. One card = one conversation. See who is working, who finished, and who is waiting for you. Local, free, open source.">
+<meta property="og:title" content="Agent Board">
+<meta property="og:description" content="One board for Claude Code, Codex, Cursor and opencode.">
+<meta property="og:image" content="poster.jpg">
+<link rel="icon" href="icon.png">
+<style>
+  :root {
+    --bg: #050806;
+    --fg: #e2ece5;
+    --dim: #7f9a8a;
+    --faint: #4a5a51;
+    --acc: #5bd98a;
+    --line: #1a241e;
+    --mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: var(--mono); font-size: 15px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* фосфорное свечение за первым экраном — как на энд-карде ролика */
+  .glow {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background: radial-gradient(46% 40% at 50% 22%, rgba(46,122,82,0.20) 0%, rgba(5,8,6,0) 70%);
+  }
+  main { position: relative; z-index: 1; max-width: 940px; margin: 0 auto; padding: 0 24px 96px; }
+
+  header { padding: 84px 0 0; text-align: center; }
+  .logo { display: flex; align-items: center; justify-content: center; gap: 16px; }
+  .logo img { width: 60px; height: 60px; border-radius: 14px; box-shadow: 0 0 30px rgba(91,217,138,0.18); }
+  h1 { font-size: 38px; letter-spacing: -0.02em; margin: 0; font-weight: 700; }
+  .caret {
+    display: inline-block; width: 12px; height: 28px; margin-left: 7px;
+    background: var(--acc); vertical-align: -4px; box-shadow: 0 0 12px rgba(91,217,138,0.6);
+    animation: blink 1.3s steps(1) infinite;
+  }
+  @keyframes blink { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0.15; } }
+  .tag { margin: 20px auto 0; font-size: 18px; color: #9fc7ae; max-width: 620px; }
+  .sub { margin: 12px auto 0; color: var(--dim); max-width: 640px; font-size: 14px; }
+
+  .cta { margin: 34px 0 10px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 11px 22px; border-radius: 8px; text-decoration: none;
+    font-size: 14px; font-weight: 600; border: 1px solid #2e7a52; color: #eafff2; background: #205c3b;
+  }
+  .btn:hover { background: #27714a; }
+  .btn.ghost { background: transparent; color: var(--fg); border-color: var(--line); }
+  .btn.ghost:hover { border-color: var(--faint); }
+  .req { color: var(--faint); font-size: 12.5px; margin-top: 10px; }
+
+  video { width: 100%; margin: 44px 0 0; border-radius: 10px; display: block; }
+
+  .agents { display: flex; gap: 38px; justify-content: center; flex-wrap: wrap; margin: 56px 0 0; }
+  .agent { display: flex; flex-direction: column; align-items: center; gap: 9px; }
+  .agent i {
+    width: 26px; height: 26px; display: block; background: currentColor;
+    -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat;
+  }
+  .agent span { font-size: 12px; color: var(--dim); letter-spacing: 0.05em; }
+
+  .rows { margin: 72px 0 0; border-top: 1px solid var(--line); }
+  .row { display: flex; gap: 20px; padding: 22px 0; border-bottom: 1px solid var(--line); }
+  .row b { flex: 0 0 168px; font-weight: 600; color: var(--fg); }
+  .row p { margin: 0; color: var(--dim); }
+
+  .install { margin: 48px 0 0; }
+  .install p { color: var(--dim); font-size: 13.5px; margin: 0 0 10px; }
+  code {
+    display: block; padding: 13px 16px; background: #0b120e; border: 1px solid var(--line);
+    border-radius: 8px; color: #9fc7ae; font-size: 13px; overflow-x: auto; white-space: pre;
+  }
+
+  footer {
+    margin: 72px 0 0; padding-top: 24px; border-top: 1px solid var(--line);
+    color: var(--faint); font-size: 13px; display: flex; gap: 18px; flex-wrap: wrap;
+    justify-content: space-between;
+  }
+  footer a { color: var(--dim); text-decoration: none; }
+  footer a:hover { color: var(--fg); }
+
+  @media (max-width: 620px) {
+    h1 { font-size: 28px; }
+    .tag { font-size: 16px; }
+    .row { flex-direction: column; gap: 6px; }
+    .row b { flex: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<main>
+  <header>
+    <div class="logo">
+      <img src="icon.png" alt="">
+      <h1>agentboard<i class="caret"></i></h1>
+    </div>
+    <p class="tag">One board for Claude Code, Codex, Cursor and opencode.</p>
+    <p class="sub">One card is one conversation. Drag cards where you want them, group them by
+      project, and see at a glance who is working, who finished, and who is waiting for your reply.</p>
+
+    <div class="cta">
+      <a class="btn" href="https://github.com/mikky-a/agentboard/releases/latest/download/AgentBoard.dmg">Download for macOS</a>
+      <a class="btn ghost" href="https://github.com/mikky-a/agentboard">View on GitHub</a>
+    </div>
+    <p class="req">macOS 13+, Apple Silicon · signed and notarized · no Homebrew, no Xcode tools</p>
+  </header>
+
+  <video src="demo.mp4" poster="poster.jpg" autoplay loop muted playsinline></video>
+
+  <div class="agents">
+    <div class="agent" style="color:#d97757"><i style="-webkit-mask-image:url(agent-claude.svg);mask-image:url(agent-claude.svg)"></i><span>Claude Code</span></div>
+    <div class="agent" style="color:#cfe0d6"><i style="-webkit-mask-image:url(agent-codex.svg);mask-image:url(agent-codex.svg)"></i><span>Codex</span></div>
+    <div class="agent" style="color:#cfe0d6"><i style="-webkit-mask-image:url(agent-cursor.svg);mask-image:url(agent-cursor.svg)"></i><span>Cursor</span></div>
+    <div class="agent" style="color:#cfe0d6"><i style="-webkit-mask-image:url(agent-opencode.svg);mask-image:url(agent-opencode.svg)"></i><span>opencode</span></div>
+  </div>
+
+  <section class="rows">
+    <div class="row"><b>Waiting for you</b>
+      <p>When an agent stops to ask for approval, its card turns amber and the board counts it in
+        the header. No more finding out forty minutes later.</p></div>
+    <div class="row"><b>Reply from the card</b>
+      <p>Answer an agent without opening a terminal. Open the live terminal when you actually want it.</p></div>
+    <div class="row"><b>Nothing is lost</b>
+      <p>Cards survive reboots: a live agent becomes paused and resumes with one click. Removing a
+        card never deletes the conversation history.</p></div>
+    <div class="row"><b>Local by design</b>
+      <p>The board reads the CLIs' own logs and talks to tmux on your machine. No account, no
+        telemetry, nothing leaves the laptop.</p></div>
+    <div class="row"><b>Three skins</b>
+      <p>Terminal phosphor, macOS glass, Soviet retro console — each with a night mode.</p></div>
+  </section>
+
+  <div class="install">
+    <p>Prefer the source?</p>
+    <code>curl -fsSL https://raw.githubusercontent.com/mikky-a/agentboard/main/install.sh | sh</code>
+  </div>
+
+  <footer>
+    <span>local · free · open source · MIT</span>
+    <span><a href="https://github.com/mikky-a/agentboard">github.com/mikky-a/agentboard</a></span>
+  </footer>
+</main>
+</body>
+</html>
