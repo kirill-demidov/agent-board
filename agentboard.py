@@ -2280,7 +2280,7 @@ def search_history(query, limit=25):
     match = _fts_query(query)
     if not match or not search_available():
         return []
-    out, seen = [], set()
+    out, seen = [], {}
     try:
         # read-only: индекс чужой, писать в него мы не должны ни при каких условиях
         con = sqlite3.connect(f"file:{HISTORY_DB}?mode=ro", uri=True, timeout=3)
@@ -2293,20 +2293,34 @@ def search_history(query, limit=25):
     except sqlite3.Error:
         return []
     for path, date, proj, summary, sig, snip in rows:
-        # один разговор мог попасть в индекс дважды (копия в облаке)
-        key = sig or path
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append({
+        cwd = proj or ""
+        sid = os.path.basename(path)[:-6] if path.endswith(".jsonl") else ""
+        # открыть можно не всё: в архивной копии свои имена файлов и никакого
+        # sessionId, а папка проекта могла с тех пор исчезнуть — без живого
+        # транскрипта и cwd ни add, ни resume не сработают
+        can_open = bool(sid) and os.path.isdir(cwd) \
+            and bool(find_session_file(cwd, sid))
+        hit = {
             "path": path,
-            "id": os.path.basename(path)[:-6] if path.endswith(".jsonl") else "",
-            "cwd": proj or "",
-            "project": os.path.basename((proj or "").rstrip("/")),
+            "id": sid,
+            "cwd": cwd,
+            "project": os.path.basename(cwd.rstrip("/")),
             "date": date or "",
             "summary": (summary or "").strip()[:110],
             "snippet": " ".join((snip or "").split())[:220],
-        })
+            "can_open": can_open,
+        }
+        # тот же разговор часто лежит и в живой папке, и в архивной копии.
+        # Показываем один раз, но именно ту копию, которую можно открыть, —
+        # иначе релевантность решает за нас и прячет рабочую за архивной
+        key = sig or path
+        if key in seen:
+            prev = seen[key]
+            if can_open and not prev["can_open"]:
+                prev.update(hit)
+            continue
+        seen[key] = hit
+        out.append(hit)
         if len(out) >= int(limit):
             break
     return out

@@ -86,7 +86,23 @@
   .tsearch { transition: width 0.18s ease; }
   #popover .po-hit { padding: 7px 12px; cursor: pointer; display: grid; gap: 2px; }
   #popover .po-hit:hover { background: #1c2a22; }
-  #popover .po-hit .h { display: flex; gap: 7px; font-size: 10.5px; color: #5f7a6b; }
+  #popover .po-hit .h {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 10.5px; color: #5f7a6b;
+  }
+  #popover .hit-open {
+    margin-left: auto; font: inherit; font-size: 10px; cursor: pointer;
+    padding: 1px 8px; border-radius: 99px;
+    background: #205c3b; border: 1px solid #2e7a52; color: #eafff2;
+    visibility: hidden;
+  }
+  #popover .po-hit:hover .hit-open { visibility: visible; }
+  #popover .hit-open:hover { background: #2a7549; }
+  #popover .hit-ro {
+    margin-left: auto; font-size: 9.5px; cursor: help;
+    padding: 1px 7px; border-radius: 99px;
+    color: #6d8377; border: 1px dashed #33413a;
+  }
   #popover .po-hit .s {
     font-size: 11.5px; color: #cfe0d6; line-height: 1.35;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -891,6 +907,9 @@
       searchPlaceholder: 'search all conversations',
       searchHead: '$N found — click to put on the board',
       searchNone: 'nothing found',
+      searchOpen: 'open',
+      searchArchive: 'archived',
+      searchArchiveTip: 'only in the archived copy — no live transcript to reopen',
       legendTitle: 'what the colours mean',
       legendHead: 'card colours',
       legWorking: 'running right now',
@@ -971,6 +990,9 @@
       searchPlaceholder: 'поиск по всем разговорам',
       searchHead: 'нашлось $N — клик положит на доску',
       searchNone: 'ничего не найдено',
+      searchOpen: 'открыть',
+      searchArchive: 'архив',
+      searchArchiveTip: 'есть только в архивной копии — живого транскрипта нет, открывать нечего',
       legendTitle: 'что значат цвета',
       legendHead: 'цвета карточек',
       legWorking: 'работает прямо сейчас',
@@ -1973,21 +1995,39 @@
       '<div class="po-list">' + hits.map((h, i) =>
         '<div class="po-hit" data-i="' + i + '">' +
         '<span class="h"><b>' + esc(h.project || '?') + '</b>' +
-        '<span>' + esc((h.date || '').slice(0, 10)) + '</span></span>' +
+        '<span>' + esc((h.date || '').slice(0, 10)) + '</span>' +
+        (h.can_open
+          ? '<button class="hit-open" data-i="' + i + '">' + t('searchOpen') +
+            '</button>'
+          : '<span class="hit-ro" title="' + t('searchArchiveTip') + '">' +
+            t('searchArchive') + '</span>') + '</span>' +
         // разметку сниппета ставит сам FTS5 — маркеры ‹› заменяем на <mark>
         '<span class="s">' + esc(h.snippet).replace(/‹/g, '<mark>')
           .replace(/›/g, '</mark>') + '</span></div>').join('') + '</div>');
     popover.dataset.owner = 'search';
+
+    // положить разговор на доску карточкой; open=true — сразу и поднять его
+    async function take(h, open) {
+      hidePopover();
+      searchBox.value = '';
+      await api('add?id=' + encodeURIComponent(h.id) +
+                '&cwd=' + encodeURIComponent(h.cwd) +
+                '&project=' + encodeURIComponent(h.project) +
+                '&title=' + encodeURIComponent(h.summary || h.snippet.slice(0, 80)));
+      // resume сам решит: сессия жива — покажет её терминал, нет — поднимет
+      if (open) await api('resume?id=' + encodeURIComponent(h.id));
+      poll();
+    }
+
     popover.querySelectorAll('.po-hit').forEach(el => {
-      el.onclick = async () => {
-        const h = hits[+el.dataset.i];
-        hidePopover();
-        searchBox.value = '';
-        await api('add?id=' + encodeURIComponent(h.id) +
-                  '&cwd=' + encodeURIComponent(h.cwd) +
-                  '&project=' + encodeURIComponent(h.project) +
-                  '&title=' + encodeURIComponent(h.summary || h.snippet.slice(0, 80)));
-        poll();
+      const h = hits[+el.dataset.i];
+      if (!h.can_open) { el.style.cursor = 'default'; return; }
+      el.onclick = () => take(h, false);
+    });
+    popover.querySelectorAll('.hit-open').forEach(btn => {
+      btn.onclick = e => {
+        e.stopPropagation();   // иначе сработает и клик по строке
+        take(hits[+btn.dataset.i], true);
       };
     });
   }
