@@ -497,6 +497,11 @@ def _install_into(path, extra=None):
 # сообщение уходит только короткий маркер [agentboard:<путь>]. Если секция
 # не установлена — фолбэк: инструкция целиком в хвосте сообщения.
 
+# AGENTBOARD_SELFNAME=0 — доска не трогает глобальную память агента и не шлёт
+# ему инструкцию самоименования; карточка берёт заголовок из первого промпта и
+# из summary сессии. Для тех, у кого в CLAUDE.md свой регламент.
+SELFNAME = os.environ.get("AGENTBOARD_SELFNAME", "1") != "0"
+
 CLAUDE_MD = os.path.expanduser("~/.claude/CLAUDE.md")
 CODEX_MD = os.path.expanduser("~/.codex/AGENTS.md")
 OPENCODE_MD = os.path.expanduser("~/.config/opencode/AGENTS.md")
@@ -528,6 +533,8 @@ NAME_RE = re.compile(r"\s*\[(?:agentboard:|служебное, к задаче �
 
 def _md_installed(path):
     """Установлена именно актуальная секция — устаревшая требует переустановки."""
+    if not SELFNAME:
+        return True  # секция не нужна — её отсутствие не повод звать установку
     try:
         with open(path) as f:
             return NAME_SECTION in f.read()
@@ -537,6 +544,8 @@ def _md_installed(path):
 
 def _install_md(path):
     """Дописать секцию доски в память агента (или заменить её старую версию)."""
+    if not SELFNAME:
+        return
     try:
         with open(path) as f:
             txt = f.read()
@@ -1901,6 +1910,8 @@ def name_tail(name, agent="claude", cwd=""):
     Инструкция установлена в глобальную память агента — хватает маркера
     (+logo — доска уже знает, что аватарки нет, агенту проверять не надо);
     не установлена — фолбэк, инструкция целиком."""
+    if not SELFNAME:
+        return ""
     path = os.path.join(NAMES_DIR, name)
     md = AGENT_MD.get(agent)
     if md and _md_installed(md):
@@ -1942,12 +1953,14 @@ def new_agent(cwd, project, prompt="", agent="claude", model="", effort=""):
             parts += ["--model", model]
         # разрешение ровно на команду имени — чтобы claude не спрашивал подтверждение
         settings = {"permissions": {"allow": [
-            f"Bash(tee {shlex.quote(os.path.join(NAMES_DIR, name))}:*)"]}}
+            f"Bash(tee {shlex.quote(os.path.join(NAMES_DIR, name))}:*)"]}} if SELFNAME else {}
         if effort:
             settings["effortLevel"] = effort
-        parts += ["--settings", json.dumps(settings)]
+        if settings:
+            parts += ["--settings", json.dumps(settings)]
     if prompt.strip():
-        full = prompt + "\n\n" + name_tail(name, agent, cwd)
+        tail = name_tail(name, agent, cwd)
+        full = prompt + ("\n\n" + tail if tail else "")
         if agent == "opencode":
             parts += ["--prompt", full]  # позиционный аргумент opencode — папка
         else:
@@ -1984,7 +1997,7 @@ def send_to_agent(name, text):
     """Кинуть сообщение агенту в терминал, не открывая его."""
     if not text.strip() or not tmux_ok("has-session", "-t", name):
         return False
-    card = claim_naming(name)
+    card = claim_naming(name) if SELFNAME else None
     if card:
         text = (text.rstrip() + " " +
                 name_tail(name, card.get("agent", "claude"), card.get("cwd", "")))

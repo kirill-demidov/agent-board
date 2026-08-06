@@ -101,6 +101,13 @@ pull possible.)
 - `AGENTBOARD_DIRS` — colon-separated list of folders to scan for projects in
   the "＋ agent" picker (default: `~/Documents/dev:~/Documents`). Any other
   folder is always reachable via the native "other folder…" dialog.
+- `AGENTBOARD_SELFNAME=0` — turn off card self-naming. By default the board
+  appends an `## Agent Board (meta-harness)` section to the agent's global
+  memory (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
+  `~/.config/opencode/AGENTS.md`) asking it to `tee` a short task title as its
+  very first action, so cards get meaningful names. With `0` the board writes
+  nothing to those files and sends no naming instruction; card titles fall back
+  to the first prompt and the session summary.
 
 ## Files
 
