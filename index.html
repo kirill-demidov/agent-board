@@ -181,6 +181,8 @@
   .ver:hover { opacity: 1; text-decoration: underline; }
 
   #canvas { position: relative; min-width: 100vw; min-height: 100vh; }
+  /* только на время раскладки: постоянный transition мешал бы таскать */
+  #canvas.tidying .acard { transition: left 0.35s ease, top 0.35s ease; }
 
   /* ---------- карточка агента ---------- */
   .acard {
@@ -263,6 +265,7 @@
     .acard.born, .acard.born::after, .umsg.grow, .st.rip, .ldr i, .acard-body.fresh { animation: none; }
     .gmsg, .acard-body .old { transition: none; }
     .caret, #topPlus::before, #topPlus .seed { animation: none !important; }
+    #canvas.tidying .acard { transition: none; }
   }
 
   .hlogo {
@@ -761,6 +764,9 @@
     <span class="gbadge" id="gbadge" hidden><i class="gdot"></i><span id="gbadgeText"></span></span>
     <span class="wbadge" id="wbadge" hidden><i class="wdot"></i><span id="wbadgeText"></span></span>
     <button class="top-btn" id="topPlus"><svg class="plus-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><i class="seed"></i><span id="topPlusLabel">agent</span></button>
+    <button class="top-btn ghost icon-btn" id="topTidy" title="arrange the cards in a grid">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/></svg>
+    </button>
     <button class="top-btn ghost icon-btn" id="topHist" title="revive an agent from history">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.3"/><polyline points="3 3 3 7.5 7.5 7.5"/><polyline points="12 7 12 12 15.5 14"/></svg>
     </button>
@@ -809,6 +815,7 @@
       hooksFailed: 'failed: a config cannot be read, see README',
       newAgent: 'agent',
       histTitle: 'revive an agent from history',
+      tidyTitle: 'arrange the cards in a grid',
       settingsTitle: 'settings',
       boardEmpty: 'The board is empty.<br>Hit <code>＋ agent</code> — pick a project, describe a task; the agent appears as a tile<br>and blinks when it finishes or asks you something.',
       all: 'all',
@@ -876,6 +883,7 @@
       hooksFailed: 'не вышло: конфиг не читается, смотри README',
       newAgent: 'агент',
       histTitle: 'воскресить агента из истории',
+      tidyTitle: 'разложить карточки по сетке',
       settingsTitle: 'настройки',
       boardEmpty: 'Доска пустая.<br>Жми <code>＋ агент</code> — выбери проект, напиши задачу, агент появится плиткой<br>и замигает, когда закончит или спросит.',
       all: 'все',
@@ -951,6 +959,7 @@
     }
     set('topPlusLabel', 'textContent', t('newAgent'));
     set('topHist', 'title', t('histTitle'));
+    set('topTidy', 'title', t('tidyTitle'));
     set('topSettings', 'title', t('settingsTitle'));
     const emptyBox = document.querySelector('#empty > div');
     if (emptyBox) emptyBox.innerHTML = t('boardEmpty');
@@ -1069,6 +1078,41 @@
     }
     canvas.style.width = w + 'px';
     canvas.style.height = h + 'px';
+  }
+
+  // ---------- разложить всё по сетке ----------
+  // Доска бесконечная и карточки таскают руками — рано или поздно они
+  // расползаются. Складываем их в колонки по ширине окна: группа — проект
+  // (связанное рядом), внутри — сперва те, кто ждёт тебя.
+  const TIDY_RANK = { waiting: 0, working: 1, idle: 2, parked: 3 };
+
+  function tidy() {
+    if (!lastAgents.length) return;
+    const GAP = 24, X0 = 40, Y0 = 90;
+    const ordered = [...lastAgents].sort((a, b) =>
+      (a.project || '').localeCompare(b.project || '') ||
+      (TIDY_RANK[a.status] ?? 9) - (TIDY_RANK[b.status] ?? 9) ||
+      (b.activity || 0) - (a.activity || 0) ||
+      a.name.localeCompare(b.name));
+    const cols = Math.max(1, Math.floor(
+      (window.innerWidth - X0 * 2 + GAP) / (CARD_W + GAP)));
+    const bottom = new Array(cols).fill(Y0);
+    canvas.classList.add('tidying');
+    for (const a of ordered) {
+      // самая короткая колонка: высоты карточек разные, иначе строки рваные
+      let c = 0;
+      for (let i = 1; i < cols; i++) if (bottom[i] < bottom[c] - 1) c = i;
+      const p = { x: X0 + c * (CARD_W + GAP), y: bottom[c],
+                  t: (pos[a.name] || {}).t || Date.now() };
+      pos[a.name] = p;
+      bottom[c] += cardH(a) + GAP;
+      const el = cards[a.name];
+      if (el) { el.style.left = p.x + 'px'; el.style.top = p.y + 'px'; }
+    }
+    save();
+    fitCanvas();
+    window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+    setTimeout(() => canvas.classList.remove('tidying'), 450);
   }
 
   // ---------- карточки ----------
@@ -1757,6 +1801,10 @@
     });
   }
 
+  document.getElementById('topTidy').addEventListener('click', () => {
+    hidePopover();
+    tidy();
+  });
   document.getElementById('topPlus').addEventListener('click', () => {
     if (popoverOpen('plus')) { hidePopover(); return; }
     plusMenu();   // без координат: весь поток «＋ агент» живёт по центру экрана

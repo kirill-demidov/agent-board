@@ -33,6 +33,9 @@ __version__ = "0.2.2"
 PORT = int(os.environ.get("AGENTBOARD_PORT", "8787"))
 # кем доска соглашается себя считать: всё прочее в Host/Origin — чужой сайт
 LOCAL_HOSTS = frozenset(("localhost", "127.0.0.1", "::1"))
+# в чём открывать сессию по клику. Warp идёт своим путём (см. _open_in_warp),
+# Terminal и iTerm2 берут .command-файл
+TERMINAL_APP = os.environ.get("AGENTBOARD_TERMINAL", "Terminal")
 # бандл-версия (.app) приносит свой tmux и живёт на своём сокете,
 # чтобы не пересекаться с юзерским tmux-сервером (protocol version mismatch)
 TMUX = os.environ.get("AGENTBOARD_TMUX") or shutil.which("tmux") or "/opt/homebrew/bin/tmux"
@@ -1920,10 +1923,40 @@ def free_name(base):
     return name
 
 
+def _open_in_warp(name, attached):
+    """Warp не открывает .command и не скриптуется — зато умеет launch
+    configuration: YAML в ~/.warp/launch_configurations и переход по
+    warp://launch/<имя>. Точной вкладки у нас нет, поэтому уже подключённую
+    сессию просто выносим вперёд вместе с приложением."""
+    if attached:
+        subprocess.run(["open", "-a", "Warp"], capture_output=True, timeout=10)
+        return
+    safe = re.sub(r"[^\w.-]", "_", name)
+    cfg = os.path.expanduser("~/.warp/launch_configurations")
+    os.makedirs(cfg, exist_ok=True)
+    attach = " ".join(shlex.quote(a) for a in TMUX_CMD) + \
+        f" attach -t {shlex.quote(name)}"
+    # без cwd Warp конфиг молча не запускает — берём папку самой сессии
+    cwd = tmux("display", "-p", "-t", name, "#{session_path}").strip() \
+        or os.path.expanduser("~")
+    # json.dumps — валидный YAML-скаляр, а кавычки экранирует за нас
+    with open(os.path.join(cfg, f"agentboard-{safe}.yaml"), "w") as f:
+        f.write("---\nname: " + json.dumps(f"agentboard-{safe}") + "\nwindows:\n"
+                "  - tabs:\n      - title: " + json.dumps(name) + "\n"
+                "        layout:\n          cwd: " + json.dumps(cwd) + "\n"
+                "          commands:\n"
+                "            - exec: " + json.dumps(attach) + "\n")
+    subprocess.run(["open", f"warp://launch/agentboard-{safe}"],
+                   capture_output=True, timeout=10)
+
+
 def open_in_terminal(name):
     # уже подключён терминал? — поднимаем его окно, а не плодим дубль
     ttys = tmux("list-clients", "-t", name, "-F", "#{client_tty}").split()
-    if ttys:
+    if TERMINAL_APP == "Warp":
+        _open_in_warp(name, bool(ttys))
+        return
+    if ttys and TERMINAL_APP == "Terminal":
         script = (
             'tell application "Terminal"\n'
             "  activate\n"
@@ -1949,8 +1982,9 @@ def open_in_terminal(name):
         f.write("#!/bin/sh\nexec " + " ".join(shlex.quote(a) for a in TMUX_CMD)
                 + f" attach -t {shlex.quote(name)}\n")
     os.chmod(path, 0o755)
-    subprocess.run(["open", "-a", "Terminal", path], capture_output=True, timeout=10)
-    subprocess.run(["osascript", "-e", 'tell application "Terminal" to activate'],
+    subprocess.run(["open", "-a", TERMINAL_APP, path], capture_output=True, timeout=10)
+    subprocess.run(["osascript", "-e",
+                    f'tell application "{TERMINAL_APP}" to activate'],
                    capture_output=True, timeout=10)
 
 

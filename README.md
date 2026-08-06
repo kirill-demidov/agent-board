@@ -101,6 +101,13 @@ pull possible.)
 - `AGENTBOARD_DIRS` — colon-separated list of folders to scan for projects in
   the "＋ agent" picker (default: `~/Documents/dev:~/Documents`). Any other
   folder is always reachable via the native "other folder…" dialog.
+- `AGENTBOARD_TERMINAL` — which app "open" hands the session to (default:
+  `Terminal`). `Warp` is special-cased: it neither opens `.command` files nor
+  speaks AppleScript, so the board writes a launch configuration into
+  `~/.warp/launch_configurations/` and follows `warp://launch/<name>`. Any other
+  value is passed to `open -a`, which works for anything that runs `.command`
+  files (iTerm2, for one). Only `Terminal` can raise the exact window of an
+  already-attached session; the rest just come to the front.
 - `AGENTBOARD_SELFNAME=0` — turn off card self-naming. By default the board
   appends an `## Agent Board (meta-harness)` section to the agent's global
   memory (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
