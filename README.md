@@ -27,8 +27,13 @@
 > - **A card centres and grows while you talk to it**, instead of typing into a
 >   280px tile wherever it happens to sit.
 > - **A tidy button** packs drifted cards into columns by project.
-> - **`AGENTBOARD_TERMINAL`** picks the app that opens a session; Warp gets a
->   launch configuration since it reads neither `.command` files nor AppleScript.
+> - **The amber counter is a switch**: click it and the board keeps only the
+>   sessions waiting for you — a card you are answering stays put until you
+>   close its composer, and the filter releases the board once nobody waits.
+> - **Card size** — compact / normal / large / huge, in settings; the layout math
+>   follows, so a resize repacks the grid instead of overlapping tiles.
+> - **`AGENTBOARD_TERMINAL`** picks the app that opens a session; with the
+>   board's `~/.zshrc` snippet Warp opens sessions as tabs, otherwise as windows.
 > - **`AGENTBOARD_SELFNAME=0`** keeps the board out of the agent's global memory
 >   (`~/.claude/CLAUDE.md` and friends) at the cost of derived card titles.
 > - Fixes: cyrillic no longer arrives as mojibake when sent from the board (the

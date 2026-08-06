@@ -370,6 +370,20 @@ body::before {
   animation: none;
 }
 .wbadge:not(.hooksbar) .wdot { background: #ff9f0a; }
+/* счётчик-выключатель «только ждущие»: системная капсула, как выбранный сегмент */
+#wbadge:hover { background: rgba(0, 0, 0, 0.05); }
+#wbadge.on {
+  background: rgba(255, 159, 10, 0.16);
+  border-color: transparent;
+  box-shadow: inset 0 0 0 0.5px rgba(154, 98, 0, 0.25);
+}
+/* фильтр держит доску — системное фокус-кольцо по краю окна */
+body.only-waiting::after {
+  border: 2px solid rgba(255, 159, 10, 0.5);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+              inset 0 0 22px rgba(255, 159, 10, 0.08);
+}
 
 /* «＋ agent»: чернильная капсула; оправа переливается под курсором и при ините */
 #topPlus {
@@ -432,6 +446,16 @@ html.dark .chip.on { color: #f5f5f7; background: rgba(255, 255, 255, 0.1); }
 html.dark .chip .c, html.dark .chip.on .c { color: #8e8e93; }
 html.dark .gbadge { color: #5bd98a; }
 html.dark .wbadge:not(.hooksbar) { color: #ffb340; }
+html.dark #wbadge:hover { background: rgba(255, 255, 255, 0.08); }
+html.dark #wbadge.on {
+  background: rgba(255, 159, 10, 0.22);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 179, 64, 0.35);
+}
+html.dark body.only-waiting::after {
+  border-color: rgba(255, 179, 64, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.4),
+              inset 0 0 24px rgba(255, 159, 10, 0.1);
+}
 html.dark .top-btn.ghost {
   background: rgba(255, 255, 255, 0.1);
   color: #f5f5f7;

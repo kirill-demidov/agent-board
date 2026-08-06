@@ -12,6 +12,11 @@
     --acc: #5bd98a;
     --flash: rgba(91,217,138,0.4);
     --ldr: #5f7a6b;
+    /* размер карточек — один рычаг на всю доску, js подменяет обе величины
+       вместе (см. CARD_SIZES); раскладка читает их же, чтобы плитки не лезли
+       друг на друга */
+    --card-w: 280px;
+    --card-body-h: 128px;
   }
   body {
     background: #0a100d;
@@ -165,6 +170,22 @@
   /* статусы — тихие точки с числом: историю рассказывает спектр в стекле */
   .gbadge, .wbadge:not(.hooksbar) { background: transparent; border-color: transparent; }
   .wbadge:not(.hooksbar) { animation: none; }
+  /* счётчик «ждут тебя» — он же выключатель: на доске остаются только они */
+  #wbadge { cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease; }
+  #wbadge:hover { background: rgba(232,180,75,0.12); }
+  #wbadge.on {
+    background: rgba(232,180,75,0.16);
+    border-color: rgba(232,180,75,0.45);
+    box-shadow: 0 0 12px rgba(232,180,75,0.2);
+  }
+  /* пока фильтр держит доску — тонкая янтарная кромка по краю окна */
+  body.only-waiting::after {
+    content: ""; position: fixed; inset: 0; z-index: 45; pointer-events: none;
+    border: 1.5px solid rgba(232,180,75,0.35);
+    box-shadow: inset 0 0 26px rgba(232,180,75,0.09);
+    animation: onlyWaitEdge 2.6s ease-in-out infinite;
+  }
+  @keyframes onlyWaitEdge { 50% { border-color: rgba(232,180,75,0.16); } }
   /* «＋ agent»: кнопка-константа; оправа вспыхивает только как отклик —
      под курсором и пока агент рождается (js вешает .init) */
   #topPlus { position: relative; display: inline-flex; align-items: center; gap: 5px; }
@@ -226,7 +247,7 @@
   /* ---------- карточка агента ---------- */
   .acard {
     position: absolute;
-    width: 280px;
+    width: var(--card-w);
     background: rgba(14,20,17,0.94);
     border: 1px solid #2c3a32;
     border-radius: 10px;
@@ -317,6 +338,8 @@
     .gmsg, .acard-body .old { transition: none; }
     .caret, #topPlus::before, #topPlus .seed { animation: none !important; }
     #canvas.tidying .acard { transition: none; }
+    body.only-waiting::after { animation: none; }
+    #wbadge { transition: none; }
   }
 
   .hlogo {
@@ -330,7 +353,7 @@
     color: #8fa398;
     white-space: pre-wrap;
     word-break: break-word;
-    max-height: 128px;
+    max-height: var(--card-body-h);
     overflow-y: auto;
   }
   .acard-body .tcall { color: #5f6f66; }
@@ -961,6 +984,10 @@
       loading: 'loading…', empty: 'empty',
       boardSkin: 'board skin', agents: 'agents', language: 'language',
       appearance: 'appearance', light: 'light', dark: 'dark',
+      cardSize: 'card size', sizeS: 'compact', sizeM: 'normal',
+      sizeL: 'large', sizeXL: 'huge',
+      onlyWaitingOff: 'needs you — click to show only these',
+      onlyWaitingOn: 'showing only those waiting — click to show everyone',
       terminal: 'Terminal',
       obHead: 'Welcome to Agent Board',
       obSub: 'Which agents should the board manage? Installed CLIs are pre-selected — you can change this later in settings.',
@@ -1044,6 +1071,10 @@
       loading: 'загружаю…', empty: 'пусто',
       boardSkin: 'скин доски', agents: 'агенты', language: 'язык',
       appearance: 'оформление', light: 'светлое', dark: 'тёмное',
+      cardSize: 'размер карточек', sizeS: 'компактный', sizeM: 'обычный',
+      sizeL: 'крупный', sizeXL: 'огромный',
+      onlyWaitingOff: 'ждут тебя — нажми, чтобы оставить только их',
+      onlyWaitingOn: 'на доске только ждущие — нажми, чтобы вернуть всех',
       terminal: 'Терминал',
       obHead: 'Добро пожаловать в Agent Board',
       obSub: 'Какими агентами управлять доске? Установленные CLI уже отмечены — позже это можно изменить в настройках.',
@@ -1101,7 +1132,29 @@
   const canvas = document.getElementById('canvas');
   const popover = document.getElementById('popover');
   const dim = document.getElementById('dim');
-  const CARD_W = 280, CARD_H = 195;
+  // размер плитки: ширина + высота превью. CARD_W/CARD_H держит раскладка,
+  // css-переменные — сами карточки; меняются только вместе (applyCardSize)
+  const CARD_SIZES = {
+    s: { w: 240, body: 96, h: 165 },
+    m: { w: 280, body: 128, h: 195 },
+    l: { w: 340, body: 180, h: 250 },
+    xl: { w: 420, body: 260, h: 335 },
+  };
+  let cardSize = localStorage.getItem('agentboard-cardsize');
+  if (!CARD_SIZES[cardSize]) cardSize = 'm';
+  let CARD_W = CARD_SIZES[cardSize].w, CARD_H = CARD_SIZES[cardSize].h;
+
+  function applyCardSize(key, relayout) {
+    const s = CARD_SIZES[key] || CARD_SIZES.m;
+    cardSize = CARD_SIZES[key] ? key : 'm';
+    CARD_W = s.w; CARD_H = s.h;
+    localStorage.setItem('agentboard-cardsize', cardSize);
+    document.documentElement.style.setProperty('--card-w', s.w + 'px');
+    document.documentElement.style.setProperty('--card-body-h', s.body + 'px');
+    // старые координаты считались под другую ширину — плитки бы наехали
+    if (relayout) requestAnimationFrame(tidy);
+  }
+
   const pos = JSON.parse(localStorage.getItem('agentboard-pos-v2') || '{}');
   const cards = {};      // name -> element
   let lastAgents = [];
@@ -1109,10 +1162,19 @@
   let dragging = null;
   let booted = false;    // первый полл рисует доску без анимаций рождения
   let filter = localStorage.getItem('agentboard-filter') || '';  // '' = все папки
+  // второй фильтр, поперёк папок: оставить на доске только тех, кто ждёт ответа
+  let onlyWaiting = localStorage.getItem('agentboard-only-waiting') === '1';
 
   function setFilter(p) {
     filter = p;
     localStorage.setItem('agentboard-filter', p);
+  }
+
+  function setOnlyWaiting(on) {
+    onlyWaiting = on;
+    localStorage.setItem('agentboard-only-waiting', on ? '1' : '0');
+    document.body.classList.toggle('only-waiting', on);
+    document.getElementById('wbadge').classList.toggle('on', on);
   }
 
   // чипы рисуем, только если папок на доске больше одной
@@ -2408,23 +2470,32 @@
       bar.hidden = !sel.some(p => avail[p] && !hk[p]);
     }
 
-    // фильтр по папкам: чипы в баре, скрываем чужие карточки
+    const w = lastAgents.filter(a => a.status === 'working').length;
+    const q = lastAgents.filter(a => a.status === 'waiting').length;
+
+    // фильтры: папка (чипы в баре) и «только ждущие» (счётчик-выключатель)
     const byProj = {};
     lastAgents.forEach(a => { byProj[a.project] = (byProj[a.project] || 0) + 1; });
     if (filter && !byProj[filter]) setFilter('');   // папка опустела — показываем всё
-    for (const a of lastAgents)
-      cards[a.name].style.display = (filter && a.project !== filter) ? 'none' : '';
+    if (onlyWaiting && !q) setOnlyWaiting(false);   // ждать больше некого — возвращаем всех
+    for (const a of lastAgents) {
+      const el = cards[a.name];
+      // разговор, который держат открытым, не выдёргиваем из-под курсора:
+      // ответил — карточка стала working, но пока композер раскрыт, она на месте
+      const held = el.classList.contains('focus') || el.classList.contains('open-in');
+      el.style.display =
+        (filter && a.project !== filter) ||
+        (onlyWaiting && a.status !== 'waiting' && !held) ? 'none' : '';
+    }
     renderChips(byProj);
 
-    const w = lastAgents.filter(a => a.status === 'working').length;
-    const q = lastAgents.filter(a => a.status === 'waiting').length;
     const gb = document.getElementById('gbadge');
     gb.hidden = !w;
     gb.title = t('stWorking');
     document.getElementById('gbadgeText').textContent = w;
     const wb = document.getElementById('wbadge');
     wb.hidden = !q;
-    wb.title = t('stNeedsYou');
+    wb.title = onlyWaiting ? t('onlyWaitingOn') : t('onlyWaitingOff');
     document.getElementById('wbadgeText').textContent = q;
     // спектр в стекле шапки: пропорция зелёного/янтарного = состав доски
     const tb = document.querySelector('.topbar');
@@ -2493,9 +2564,22 @@
       '<button class="po-item po-flex" data-lang="' + l.code + '">' +
       '<span class="po-check">' + (l.code === LANG ? '✓' : '') + '</span>' +
       '<span class="t">' + l.name + '</span></button>').join('');
+    // размер плиток — теми же строками с галочкой
+    const sizes = [['s', 'sizeS'], ['m', 'sizeM'], ['l', 'sizeL'], ['xl', 'sizeXL']];
+    const sizeRows = sizes.map(([key, str]) =>
+      '<button class="po-item po-flex" data-size="' + key + '">' +
+      '<span class="po-check">' + (key === cardSize ? '✓' : '') + '</span>' +
+      '<span class="t">' + t(str) + '</span></button>').join('');
     showPopover(x, y, '<div class="po-head">' + t('boardSkin') + '</div>' + rows + appBlock +
+                      '<div class="po-head">' + t('cardSize') + '</div>' + sizeRows +
                       '<div class="po-head">' + t('agents') + '</div>' + provRows +
                       '<div class="po-head">' + t('language') + '</div>' + langRows);
+    popover.querySelectorAll('.po-item[data-size]').forEach(btn => {
+      btn.onclick = () => {
+        applyCardSize(btn.dataset.size, true);
+        settingsMenu(x, y);   // перерисовать с галочкой
+      };
+    });
     popover.querySelectorAll('.po-item[data-app]').forEach(btn => {
       btn.onclick = () => {
         applyAppearance(btn.dataset.app);
@@ -2519,6 +2603,12 @@
     });
   }
 
+  // счётчик «ждут тебя» — выключатель: оставить на доске только их
+  document.getElementById('wbadge').addEventListener('click', () => {
+    setOnlyWaiting(!onlyWaiting);
+    poll();
+  });
+
   document.getElementById('topSettings').addEventListener('click', e => {
     if (popoverOpen('settings')) { hidePopover(); return; }
     settingsMenu(e.clientX, e.clientY);
@@ -2533,6 +2623,8 @@
   }
 
   applyLang();
+  applyCardSize(cardSize, false);
+  setOnlyWaiting(onlyWaiting);
   initSkins();
   poll();
   setInterval(poll, 2000);
