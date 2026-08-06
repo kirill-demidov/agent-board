@@ -105,9 +105,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if let res = bundledRes {
             p.executableURL = URL(fileURLWithPath: res + "/python/bin/python3")
             p.arguments = ["-u", res + "/server/agentboard.py"]
-            env["AGENTBOARD_DATA"] = NSHomeDirectory() + "/.agentboard"
-            env["AGENTBOARD_TMUX"] = res + "/tmux/bin/tmux"
-            env["AGENTBOARD_TMUX_SOCKET"] = "agentboard"
+            // дефолты бандла, но не поверх заданного: LSEnvironment в Info.plist
+            // задаёт сборке свои (например системный tmux, чтобы доска видела
+            // сессии, поднятые из терминала руками)
+            func fallback(_ key: String, _ value: String) {
+                if env[key] == nil { env[key] = value }
+            }
+            fallback("AGENTBOARD_DATA", NSHomeDirectory() + "/.agentboard")
+            fallback("AGENTBOARD_TMUX", res + "/tmux/bin/tmux")
+            fallback("AGENTBOARD_TMUX_SOCKET", "agentboard")
             // __pycache__ внутри подписанного бандла сломал бы печать подписи
             env["PYTHONDONTWRITEBYTECODE"] = "1"
         } else {

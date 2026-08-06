@@ -11,5 +11,16 @@
   <key>CFBundleShortVersionString</key> <string>0.2.0</string>
   <key>LSMinimumSystemVersion</key>  <string>13.0</string>
   <key>NSHighResolutionCapable</key> <true/>
+  <!-- Настройки сборки. LaunchServices кладёт их в окружение приложения, оно
+       передаёт их серверу; main.swift не перекрывает уже заданное.
+       tmux берём системный и сокет default — тот же, что у tmux из терминала,
+       иначе доска не увидит сессии, поднятые руками. -->
+  <key>LSEnvironment</key>
+  <dict>
+    <key>AGENTBOARD_SELFNAME</key>     <string>0</string>
+    <key>AGENTBOARD_TERMINAL</key>     <string>Warp</string>
+    <key>AGENTBOARD_TMUX</key>         <string>/opt/homebrew/bin/tmux</string>
+    <key>AGENTBOARD_TMUX_SOCKET</key>  <string>default</string>
+  </dict>
 </dict>
 </plist>

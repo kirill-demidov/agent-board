@@ -14,3 +14,10 @@ __pycache__/
 .DS_Store
 .build-cache/
 AgentBoard.dmg
+
+# сборка
+AgentBoard.app/
+AgentBoard.dmg
+.build-cache/
+app/AppIcon.icns
+app/AppIcon.iconset/
