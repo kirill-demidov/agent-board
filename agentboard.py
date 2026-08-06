@@ -26,7 +26,7 @@ import time
 import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 __version__ = "0.2.2"
 
@@ -55,6 +55,8 @@ CURSOR = shutil.which("cursor-agent") or os.path.expanduser("~/.local/bin/cursor
 OPENCODE = shutil.which("opencode") or os.path.expanduser("~/.opencode/bin/opencode")
 STATUS_DIR = os.path.expanduser("~/.claude/agent-status")
 NAMES_DIR = f"/tmp/agentboard-{os.getuid()}-names"  # сюда агент первой командой пишет имя карточки
+# Warp открывает вкладку без команды — команду ей передаём через этот файл (см. WARP_ZSHRC)
+WARP_ATTACH_FILE = f"/tmp/agentboard-{os.getuid()}-warp-attach"
 PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 SESSIONS_DIR = os.path.expanduser("~/.claude/sessions")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -628,6 +630,59 @@ def _install_md(path):
         f.write(txt)
 
 
+# ---- Warp: вкладка вместо окна ----
+# launch configuration (см. _open_in_warp) всегда рождает окно, а вкладку умеет
+# только warp://action/new_tab — но команду в неё не передать. Поэтому команду
+# кладём в файл, а забирает её сам шелл новой вкладки: снипет ниже живёт в
+# ~/.zshrc, срабатывает только в Warp, вне tmux и только на свежий файл
+# (иначе случайная вкладка через час подхватила бы забытый attach).
+
+ZSHRC = os.path.expanduser("~/.zshrc")
+WARP_MARK = "# >>> agentboard: Warp tabs >>>"
+WARP_MARK_END = "# <<< agentboard: Warp tabs <<<"
+WARP_ZSHRC = f"""{WARP_MARK}
+if [[ -o interactive && "$TERM_PROGRAM" == "WarpTerminal" && -z "$TMUX" \
+&& -f {WARP_ATTACH_FILE} ]]; then
+  _agentboard_cmd=$(<{WARP_ATTACH_FILE})
+  _agentboard_age=$(( $(date +%s) - $(stat -f %m {WARP_ATTACH_FILE}) ))
+  rm -f {WARP_ATTACH_FILE}
+  if [[ -n "$_agentboard_cmd" && $_agentboard_age -lt 30 ]]; then
+    unset _agentboard_age
+    eval "exec $_agentboard_cmd"
+  fi
+  unset _agentboard_cmd _agentboard_age
+fi
+{WARP_MARK_END}"""
+
+
+def _warp_zshrc_ok():
+    try:
+        with open(ZSHRC) as f:
+            return WARP_ZSHRC in f.read()
+    except OSError:
+        return False
+
+
+def _install_warp_zshrc():
+    """Дописать снипет в ~/.zshrc (старую версию блока — заменить)."""
+    try:
+        with open(ZSHRC) as f:
+            txt = f.read()
+    except OSError:
+        txt = ""
+    if WARP_ZSHRC in txt:
+        return
+    if os.path.exists(ZSHRC) and not os.path.exists(ZSHRC + ".agentboard-bak"):
+        shutil.copy2(ZSHRC, ZSHRC + ".agentboard-bak")
+    if WARP_MARK in txt:  # старая версия блока — вырезаем от метки до метки
+        i = txt.index(WARP_MARK)
+        j = txt.find(WARP_MARK_END, i)
+        txt = txt[:i].rstrip() + (txt[j + len(WARP_MARK_END):] if j != -1 else "\n")
+    txt = (txt.rstrip() + "\n\n" if txt.strip() else "") + WARP_ZSHRC + "\n"
+    with open(ZSHRC, "w") as f:
+        f.write(txt)
+
+
 AGENT_BINS = {"claude": CLAUDE, "codex": CODEX, "cursor": CURSOR, "opencode": OPENCODE}
 
 
@@ -651,6 +706,8 @@ def install_hooks(selected=None):
     if "opencode" in sel:
         _install_opencode()
         _install_md(OPENCODE_MD)
+    if TERMINAL_APP == "Warp":  # без снипета Warp открывает сессии окнами
+        _install_warp_zshrc()
     return hooks_state()
 
 
@@ -1983,18 +2040,39 @@ def _open_in_warp(name, attached):
     """Warp не открывает .command и не скриптуется — зато умеет launch
     configuration: YAML в ~/.warp/launch_configurations и переход по
     warp://launch/<имя>. Точной вкладки у нас нет, поэтому уже подключённую
-    сессию просто выносим вперёд вместе с приложением."""
+    сессию просто выносим вперёд вместе с приложением.
+
+    Launch configuration всегда открывает новое окно. Если в ~/.zshrc стоит
+    снипет доски (WARP_ZSHRC) — идём через warp://action/new_tab: вкладка в
+    текущем окне, а attach-команду шелл забирает из WARP_ATTACH_FILE. Без
+    снипета — фолбэк на окно."""
     if attached:
         subprocess.run(["open", "-a", "Warp"], capture_output=True, timeout=10)
+        return
+    attach = " ".join(shlex.quote(a) for a in TMUX_CMD) + \
+        f" attach -t {shlex.quote(name)}"
+    # cwd нужен обеим ветвям: без него launch-конфиг молча не запускается,
+    # а вкладка открылась бы в домашней папке
+    cwd = tmux("display", "-p", "-t", name, "#{session_path}").strip() \
+        or os.path.expanduser("~")
+    # у кого хуки уже стоят, плашка не вернётся — снипет доставляем сами, но
+    # только тем, кто доске конфиги уже доверил. Новая вкладка читает свежий
+    # zshrc, так что первый же клик после установки уже идёт вкладкой
+    if not _warp_zshrc_ok() and any(hooks_state().values()):
+        _install_warp_zshrc()
+    if _warp_zshrc_ok():
+        with open(WARP_ATTACH_FILE, "w") as f:
+            f.write(attach)
+        os.chmod(WARP_ATTACH_FILE, 0o600)
+        subprocess.run(
+            ["open", "warp://action/new_tab?path=" + quote(cwd)],
+            capture_output=True, timeout=10)
+        subprocess.run(["osascript", "-e", 'tell application "Warp" to activate'],
+                       capture_output=True, timeout=10)
         return
     safe = re.sub(r"[^\w.-]", "_", name)
     cfg = os.path.expanduser("~/.warp/launch_configurations")
     os.makedirs(cfg, exist_ok=True)
-    attach = " ".join(shlex.quote(a) for a in TMUX_CMD) + \
-        f" attach -t {shlex.quote(name)}"
-    # без cwd Warp конфиг молча не запускает — берём папку самой сессии
-    cwd = tmux("display", "-p", "-t", name, "#{session_path}").strip() \
-        or os.path.expanduser("~")
     # json.dumps — валидный YAML-скаляр, а кавычки экранирует за нас
     with open(os.path.join(cfg, f"agentboard-{safe}.yaml"), "w") as f:
         f.write("---\nname: " + json.dumps(f"agentboard-{safe}") + "\nwindows:\n"
@@ -2732,6 +2810,10 @@ def caffeinate_watcher():
 if __name__ == "__main__":
     print(f"Agent Board → http://localhost:{PORT}")
     os.makedirs(NAMES_DIR, exist_ok=True)
+    try:  # висячий attach от прошлого запуска чужой вкладке не нужен
+        os.remove(WARP_ATTACH_FILE)
+    except OSError:
+        pass
     if not os.path.exists(TMUX):
         print("! tmux not found — install it: brew install tmux")
     threading.Thread(target=caffeinate_watcher, daemon=True).start()

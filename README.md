@@ -142,8 +142,14 @@ pull possible.)
   folder is always reachable via the native "other folder…" dialog.
 - `AGENTBOARD_TERMINAL` — which app "open" hands the session to (default:
   `Terminal`). `Warp` is special-cased: it neither opens `.command` files nor
-  speaks AppleScript, so the board writes a launch configuration into
-  `~/.warp/launch_configurations/` and follows `warp://launch/<name>`. Any other
+  speaks AppleScript. With the board's `~/.zshrc` snippet in place (installed
+  together with the hooks) sessions open as a **tab** in the current Warp
+  window: the board drops the `tmux attach` line into
+  `/tmp/agentboard-<uid>-warp-attach` and follows
+  `warp://action/new_tab?path=<cwd>`, and the new tab's shell picks that line up
+  and `exec`s it. Without the snippet it falls back to a launch configuration in
+  `~/.warp/launch_configurations/` plus `warp://launch/<name>`, which Warp can
+  only open as a new window. Any other
   value is passed to `open -a`, which works for anything that runs `.command`
   files (iTerm2, for one). Only `Terminal` can raise the exact window of an
   already-attached session; the rest just come to the front.
