@@ -16,6 +16,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -804,6 +805,22 @@ def _host_app(pid):
         pass
     host_app_cache[pid] = name
     return name
+
+
+def _pid_gone(pid):
+    """Процесса больше нет. Зомби считаем мёртвым: он ещё в таблице процессов
+    (и os.kill по нему проходит), но уже ничего не исполняет и транскрипт
+    не держит — ждать его дальше нечего."""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return True
+    try:
+        r = subprocess.run(["ps", "-o", "state=", "-p", str(pid)],
+                           capture_output=True, text=True, timeout=5)
+        return r.stdout.strip().startswith("Z")
+    except Exception:
+        return False
 
 
 def _rec_alive(rec):
@@ -2119,6 +2136,56 @@ def new_agent(cwd, project, prompt="", agent="claude", model="", effort=""):
 
 
 @locked
+def adopt_external(sid):
+    """Забрать сессию из чужого приложения: гасим её процесс и продолжаем тот
+    же разговор своей tmux-сессией.
+
+    Двух CLI на одном транскрипте быть не должно — они его перепишут друг
+    поверх друга. Поэтому сначала SIGTERM (клоду нужно дописать лог и снять
+    регистрацию), и только когда процесс действительно умер — resume. Не
+    умер за шесть секунд: ничего не начинаем, пусть юзер закроет сам."""
+    rec = next((r for r in session_records()
+                if r.get("sessionId") == sid and _rec_alive(r)), None)
+    if not rec:
+        return False
+    cwd = rec.get("cwd") or ""
+    if not os.path.isdir(cwd):
+        return False
+    pid = int(rec["pid"])
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return False
+    for _ in range(60):
+        time.sleep(0.1)
+        if _pid_gone(pid):
+            break
+    else:
+        return False
+    host_app_cache.pop(pid, None)
+    proc_start_cache.pop(pid, None)
+    project = os.path.basename(cwd.rstrip("/")) or sid[:8]
+    name = free_name(project)
+    pre_trust("claude", cwd)
+    tmux("new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", cwd,
+         f"export PATH={shlex.quote(AGENT_PATH)}; "
+         f"{CLAUDE} --resume {shlex.quote(sid)}")
+    tmux("set-option", "-t", name, "mouse", "on")
+    tmux("set-option", "-t", name, "mode-style", "bg=colour236,fg=colour245")
+    board = load_board()
+    card = next((c for c in board["cards"]
+                 if c.get("tmux") == EXT_PREFIX + sid or c.get("id") == sid), None)
+    if card:
+        card["tmux"], card["agent"] = name, "claude"
+    else:
+        board["cards"].append({"tmux": name, "cwd": cwd, "project": project,
+                               "id": sid, "title": "", "agent": "claude",
+                               "model": "", "named": True})
+    save_board(board)
+    return True
+
+
+@locked
 def claim_naming(name):
     """Карточка ровно один раз — для первого сообщения агенту без задачи."""
     board = load_board()
@@ -2290,6 +2357,8 @@ class Handler(BaseHTTPRequestHandler):
             self.ok(add_from_history(arg("id"), arg("cwd"), arg("project"), arg("title")))
         elif url.path == "/api/resume":
             self.ok(resume_card(arg("id")))
+        elif url.path == "/api/adopt":
+            self.ok(adopt_external(arg("id")))
         elif url.path == "/api/new":
             cwd = arg("cwd")
             self.ok(bool(cwd) and os.path.isdir(cwd)

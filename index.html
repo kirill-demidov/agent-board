@@ -361,6 +361,14 @@
     color: #7d8f85; border: 1px dashed #33413a;
   }
   .acard.external .cmp-in, .acard.external .xbtn { display: none; }
+  /* второе нажатие подтверждает: доска погасит чужой процесс */
+  .acard-actions button.armed {
+    background: #6b3b1e; border-color: #97542b; color: #ffe9d6;
+  }
+  .acard-actions button.failed {
+    background: #4a2222; border-color: #7a3232; color: #ffd9d9;
+    font-size: 10px; text-transform: none; cursor: default;
+  }
 
   /* композер внутри карточки — разворачивается под рядом кнопок */
   .acard.open-in {
@@ -813,6 +821,12 @@
       resume: 'resume', open: 'open',
       external: 'own terminal',
       externalTitle: 'started outside the board — watch only: it has no tmux session, so there is nothing to attach to or send into',
+      adopt: 'take over',
+      adoptConfirm: 'sure?',
+      adoptTitle: 'continue this conversation on the board',
+      adoptAsk: 'Take over from $HOST?\n\nThe session there will be closed and reopened on the board — same conversation, nothing lost. Anything it is doing right now stops.',
+      adoptBusy: 'taking over…',
+      adoptFail: 'the session would not close — quit it in $HOST and try again',
       replyTitle: 'reply without opening',
       modelUnknown: 'model unknown',
       agentStarting: 'agent is starting…',
@@ -874,6 +888,12 @@
       resume: 'продолжить', open: 'открыть',
       external: 'свой терминал',
       externalTitle: 'запущен мимо доски — только смотреть: tmux-сессии у него нет, аттачиться и отправлять некуда',
+      adopt: 'забрать',
+      adoptConfirm: 'точно?',
+      adoptTitle: 'продолжить этот разговор на доске',
+      adoptAsk: 'Забрать из $HOST?\n\nСессия там будет закрыта и открыта заново на доске — тот же разговор, ничего не теряется. То, что она делает прямо сейчас, прервётся.',
+      adoptBusy: 'забираю…',
+      adoptFail: 'сессия не закрылась — закрой её в $HOST и попробуй снова',
       replyTitle: 'написать агенту, не открывая',
       modelUnknown: 'модель не определена',
       agentStarting: 'агент запускается…',
@@ -1183,6 +1203,8 @@
 
     // низ: кнопка слева, справа — только проект и статус
     const acts = el.querySelector('.acard-actions');
+    // «точно?» и «забираю…» живут дольше, чем интервал опроса, — не затираем
+    if (el.dataset.adopting || acts.querySelector('[data-act="adopt"].armed')) return;
     const agent = AGENT_LABELS[a.agent] ? a.agent : 'claude';
     const statusLabel = {
       working: t('stWorking'), waiting: t('stNeedsYou'), idle: t('stDone'), parked: t('stPaused'),
@@ -1190,7 +1212,9 @@
     acts.innerHTML =
       (a.external
         // управлять нечем: сессия живёт в чужом терминале, не в нашем tmux
-        ? '<span class="ext-tag" title="' + t('externalTitle') + '">' +
+        ? '<button class="primary" data-act="adopt" title="' + t('adoptTitle') + '">' +
+          t('adopt') + '</button>' +
+          '<span class="ext-tag" title="' + t('externalTitle') + '">' +
           esc(a.host || t('external')) + '</span>'
         : status === 'parked'
         ? '<button class="primary" data-act="resume">' + t('resume') + '</button>'
@@ -1350,6 +1374,34 @@
     if (act === 'resume') {
       btn.textContent = t('opening');
       await api('resume?id=' + encodeURIComponent(a.cid));
+    }
+    if (act === 'adopt') {
+      // подтверждаем прямо в карточке: confirm() в WKWebView без делегата
+      // молча отдаёт false, и в нативной обёртке кнопка бы не работала
+      const host = a.host || t('external');
+      if (!btn.dataset.armed) {
+        btn.dataset.armed = '1';
+        btn.classList.add('armed');
+        btn.textContent = t('adoptConfirm');
+        btn.title = t('adoptAsk').replace('$HOST', host);
+        setTimeout(() => {
+          if (!btn.isConnected || !btn.dataset.armed) return;
+          delete btn.dataset.armed;
+          btn.classList.remove('armed');
+          btn.textContent = t('adopt');
+        }, 5000);
+        return;
+      }
+      delete btn.dataset.armed;
+      btn.classList.remove('armed');
+      btn.textContent = t('adoptBusy');
+      card.dataset.adopting = '1';
+      const r = await api('adopt?id=' + encodeURIComponent(a.cid || ''));
+      delete card.dataset.adopting;
+      if (!r || !r.ok) {
+        btn.classList.add('failed');
+        btn.textContent = t('adoptFail').replace('$HOST', host);
+      }
     }
     poll();
   });
