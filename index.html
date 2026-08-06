@@ -76,6 +76,22 @@
   }
   .chips::-webkit-scrollbar { display: none; }
   .topbar > .top-btn, .topbar > .ver, .topbar > b { flex: none; }
+  .tsearch {
+    flex: none; width: 190px; font: inherit; font-size: 12px;
+    padding: 4px 10px; border-radius: 99px;
+    background: #131c17; color: #c7d4cc; border: 1px solid #2b3a32;
+  }
+  .tsearch::placeholder { color: #55665d; }
+  .tsearch:focus { outline: none; border-color: #3f6b52; width: 260px; }
+  .tsearch { transition: width 0.18s ease; }
+  #popover .po-hit { padding: 7px 12px; cursor: pointer; display: grid; gap: 2px; }
+  #popover .po-hit:hover { background: #1c2a22; }
+  #popover .po-hit .h { display: flex; gap: 7px; font-size: 10.5px; color: #5f7a6b; }
+  #popover .po-hit .s {
+    font-size: 11.5px; color: #cfe0d6; line-height: 1.35;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  #popover .po-hit .s mark { background: none; color: #7fe0a6; font-weight: 700; }
   .chip {
     font: inherit; font-size: 12px; flex: none; white-space: nowrap;
     padding: 2px 9px; border-radius: 99px; cursor: pointer;
@@ -791,6 +807,8 @@
     <span class="chips" id="chips"></span>
     <span id="stale" hidden style="color:#e8b44b;font-size:12px;font-weight:600">page is stale — press Cmd+R</span>
     <span class="sp"></span>
+    <input id="topSearch" class="tsearch" type="search" hidden
+           placeholder="search all conversations" autocomplete="off" spellcheck="false">
     <span class="wbadge hooksbar" id="hooksbar" hidden
           title="lifecycle hooks in the CLI configs (Claude Code, Codex, Cursor, opencode) tell the board when an agent waits for approval">
       <i class="wdot"></i><span id="hooksbarText">the board can't see agent statuses</span>
@@ -858,6 +876,9 @@
       newAgent: 'agent',
       histTitle: 'revive an agent from history',
       tidyTitle: 'arrange the cards in a grid',
+      searchPlaceholder: 'search all conversations',
+      searchHead: '$N found — click to put on the board',
+      searchNone: 'nothing found',
       legendTitle: 'what the colours mean',
       legendHead: 'card colours',
       legWorking: 'running right now',
@@ -935,6 +956,9 @@
       newAgent: 'агент',
       histTitle: 'воскресить агента из истории',
       tidyTitle: 'разложить карточки по сетке',
+      searchPlaceholder: 'поиск по всем разговорам',
+      searchHead: 'нашлось $N — клик положит на доску',
+      searchNone: 'ничего не найдено',
       legendTitle: 'что значат цвета',
       legendHead: 'цвета карточек',
       legWorking: 'работает прямо сейчас',
@@ -1021,6 +1045,7 @@
     set('topHist', 'title', t('histTitle'));
     set('topTidy', 'title', t('tidyTitle'));
     set('topLegend', 'title', t('legendTitle'));
+    set('topSearch', 'placeholder', t('searchPlaceholder'));
     set('topSettings', 'title', t('settingsTitle'));
     const emptyBox = document.querySelector('#empty > div');
     if (emptyBox) emptyBox.innerHTML = t('boardEmpty');
@@ -1878,6 +1903,63 @@
     hidePopover();
     tidy();
   });
+  // ---------- поиск по всем разговорам ----------
+  // Индекс ведёт cc-history; сервер только читает его и говорит, есть ли он.
+  const searchBox = document.getElementById('topSearch');
+  let searchTimer = null, searchSeq = 0;
+
+  async function runSearch() {
+    const q = searchBox.value.trim();
+    if (q.length < 2) { if (popoverOpen('search')) hidePopover(); return; }
+    const seq = ++searchSeq;
+    const hits = await api('search?q=' + encodeURIComponent(q));
+    if (seq !== searchSeq) return;   // пришёл ответ на устаревший запрос
+    const box = searchBox.getBoundingClientRect();
+    if (!hits || !hits.length) {
+      showPopover(box.right, 44, '<div class="po-empty">' + t('searchNone') + '</div>');
+      popover.dataset.owner = 'search';
+      return;
+    }
+    showPopover(box.right, 44,
+      '<div class="po-head">' + t('searchHead').replace('$N', hits.length) + '</div>' +
+      '<div class="po-list">' + hits.map((h, i) =>
+        '<div class="po-hit" data-i="' + i + '">' +
+        '<span class="h"><b>' + esc(h.project || '?') + '</b>' +
+        '<span>' + esc((h.date || '').slice(0, 10)) + '</span></span>' +
+        // разметку сниппета ставит сам FTS5 — маркеры ‹› заменяем на <mark>
+        '<span class="s">' + esc(h.snippet).replace(/‹/g, '<mark>')
+          .replace(/›/g, '</mark>') + '</span></div>').join('') + '</div>');
+    popover.dataset.owner = 'search';
+    popover.querySelectorAll('.po-hit').forEach(el => {
+      el.onclick = async () => {
+        const h = hits[+el.dataset.i];
+        hidePopover();
+        searchBox.value = '';
+        await api('add?id=' + encodeURIComponent(h.id) +
+                  '&cwd=' + encodeURIComponent(h.cwd) +
+                  '&project=' + encodeURIComponent(h.project) +
+                  '&title=' + encodeURIComponent(h.summary || h.snippet.slice(0, 80)));
+        poll();
+      };
+    });
+  }
+
+  searchBox.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 220);   // не бомбим базу на каждой букве
+  });
+  searchBox.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { searchBox.value = ''; hidePopover(); searchBox.blur(); }
+    if (e.key === 'Enter') { clearTimeout(searchTimer); runSearch(); }
+  });
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'f' && !searchBox.hidden) {
+      e.preventDefault();
+      searchBox.focus();
+      searchBox.select();
+    }
+  });
+
   document.getElementById('topLegend').addEventListener('click', e => {
     if (popoverOpen('legend')) { hidePopover(); return; }
     const row = (cls, label, text) =>
@@ -2219,6 +2301,9 @@
       document.getElementById('upbadgeText').textContent = t('updateReady') + ' v' + data.update;
       document.getElementById('upGo').textContent = t('updateBtn');
     }
+
+    // поиск живёт на чужом индексе (cc-history) — нет его, нет и строки
+    searchBox.hidden = !data.search;
 
     // плашка онбординга: хуков нет — доска слепа к статусу «ждёт»
     const bar = document.getElementById('hooksbar');

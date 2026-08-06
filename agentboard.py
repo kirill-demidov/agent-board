@@ -1833,7 +1833,7 @@ def get_agents():
             "providers": board["providers"],
             "models": board["models"],
             "version": __version__, "update": UPDATE["available"],
-            "hooks": hooks_state()}
+            "hooks": hooks_state(), "search": search_available()}
 
 
 # ---------- действия ----------
@@ -2219,6 +2219,62 @@ def new_agent(cwd, project, prompt="", agent="claude", model="", effort=""):
     return True
 
 
+# ---------- полнотекстовый поиск по всем разговорам ----------
+# Индекс не наш: его ведёт cc-history (FTS5 в history.db, переиндексация по
+# SessionStart). Заводить второй по тем же jsonl незачем — читаем этот, а если
+# его нет, доска просто не показывает строку поиска.
+
+HISTORY_DB = os.path.expanduser("~/.claude/cc-history/history.db")
+
+
+def search_available():
+    return os.path.isfile(HISTORY_DB)
+
+
+def _fts_query(q):
+    """Безопасное MATCH-выражение: каждое слово в кавычках и с префиксом,
+    чтобы «воронк» находил «воронки». Кавычки из запроса вычищаем — иначе
+    пользователь синтаксисом FTS5 уронит запрос."""
+    toks = [t for t in q.replace('"', " ").split() if t]
+    return " ".join('"%s"*' % t for t in toks) if toks else ""
+
+
+def search_history(query, limit=25):
+    match = _fts_query(query)
+    if not match or not search_available():
+        return []
+    out, seen = [], set()
+    try:
+        # read-only: индекс чужой, писать в него мы не должны ни при каких условиях
+        con = sqlite3.connect(f"file:{HISTORY_DB}?mode=ro", uri=True, timeout=3)
+        rows = con.execute(
+            "SELECT path, date, project, summary, sig, "
+            "snippet(messages, 7, '‹', '›', ' … ', 16) "
+            "FROM messages WHERE messages MATCH ? ORDER BY rank LIMIT ?",
+            (match, int(limit) * 4)).fetchall()
+        con.close()
+    except sqlite3.Error:
+        return []
+    for path, date, proj, summary, sig, snip in rows:
+        # один разговор мог попасть в индекс дважды (копия в облаке)
+        key = sig or path
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "path": path,
+            "id": os.path.basename(path)[:-6] if path.endswith(".jsonl") else "",
+            "cwd": proj or "",
+            "project": os.path.basename((proj or "").rstrip("/")),
+            "date": date or "",
+            "summary": (summary or "").strip()[:110],
+            "snippet": " ".join((snip or "").split())[:220],
+        })
+        if len(out) >= int(limit):
+            break
+    return out
+
+
 @locked
 def adopt_external(sid):
     """Забрать сессию из чужого приложения: гасим её процесс и продолжаем тот
@@ -2443,6 +2499,8 @@ class Handler(BaseHTTPRequestHandler):
             self.ok(resume_card(arg("id")))
         elif url.path == "/api/adopt":
             self.ok(adopt_external(arg("id")))
+        elif url.path == "/api/search":
+            self.send(200, json.dumps(search_history(arg("q"), arg("n") or 25)))
         elif url.path == "/api/new":
             cwd = arg("cwd")
             self.ok(bool(cwd) and os.path.isdir(cwd)
