@@ -30,6 +30,8 @@ from urllib.parse import parse_qs, urlparse
 __version__ = "0.2.2"
 
 PORT = int(os.environ.get("AGENTBOARD_PORT", "8787"))
+# кем доска соглашается себя считать: всё прочее в Host/Origin — чужой сайт
+LOCAL_HOSTS = frozenset(("localhost", "127.0.0.1", "::1"))
 # бандл-версия (.app) приносит свой tmux и живёт на своём сокете,
 # чтобы не пересекаться с юзерским tmux-сервером (protocol version mismatch)
 TMUX = os.environ.get("AGENTBOARD_TMUX") or shutil.which("tmux") or "/opt/homebrew/bin/tmux"
@@ -2086,7 +2088,37 @@ class Handler(BaseHTTPRequestHandler):
     def ok(self, good=True):
         self.send(200 if good else 404, json.dumps({"ok": bool(good)}))
 
+    def cross_origin(self):
+        """Запрос пришёл со стороннего сайта — отказ.
+
+        Доска слушает только localhost, но браузер отдаёт этот адрес любой
+        открытой вкладке: страница злоумышленника делает <img
+        src="localhost:8787/api/new?cwd=...&prompt=..."> и запускает агента в
+        чужом репозитории. CORS тут не спасает — простой GET уходит без
+        предполётного запроса, ответ атакующему и не нужен.
+
+        Три проверки, все — по заголовкам, которые подделать со страницы нельзя:
+        Sec-Fetch-Site (браузер сам говорит, откуда запрос), Origin (для старых
+        движков) и Host (DNS rebinding: домен атакующего резолвится в 127.0.0.1,
+        но Host остаётся его). Нативная обёртка и curl не шлют ни Sec-Fetch-*,
+        ни Origin — их пропускаем, страницей их запрос стать не может.
+        """
+        site = self.headers.get("Sec-Fetch-Site")
+        if site and site not in ("same-origin", "none"):
+            return True
+        origin = self.headers.get("Origin")
+        if origin and urlparse(origin).hostname not in LOCAL_HOSTS:
+            return True
+        host = self.headers.get("Host")
+        if host and urlparse("//" + host).hostname not in LOCAL_HOSTS:
+            return True
+        return False
+
     def do_GET(self):
+        if self.cross_origin():
+            self.log_access()
+            self.send(403, '{"error": "cross-origin request refused"}')
+            return
         if "/api/agents" not in self.path:  # агентов опрашивают каждые 2с — не шумим
             self.log_access()
         url = urlparse(self.path)
