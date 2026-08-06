@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var webView: WKWebView!
     var timer: Timer?
     var serverProc: Process?
+    var lastWaiting = 0
     var lastSpawn: Date = .distantPast
 
     // DMG-сборка несёт сервер/python/tmux внутри Resources; dev-сборка — пустая
@@ -152,8 +153,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let agents = obj["agents"] as? [[String: Any]] else { return }
             let waiting = agents.filter { ($0["status"] as? String) == "waiting" }.count
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 NSApp.dockTile.badgeLabel = waiting > 0 ? String(waiting) : nil
+                guard let self else { return }
+                // красный бейдж стоит, пока кто-то ждёт, — но заметить его можно
+                // и не глядя в док: на каждого нового ждущего иконка подпрыгивает.
+                // informational — один прыжок; critical скакал бы до переключения
+                if waiting > self.lastWaiting, !NSApp.isActive {
+                    NSApp.requestUserAttention(.informationalRequest)
+                }
+                self.lastWaiting = waiting
             }
         }.resume()
     }

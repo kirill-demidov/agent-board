@@ -201,13 +201,21 @@
   }
   .acard:active { cursor: grabbing; }
   .acard.dragging { z-index: 40; box-shadow: 0 24px 50px rgba(0,0,0,0.65); }
+  /* единственное состояние, которое требует действия, — пусть его видно
+     боковым зрением: пульсируют и свечение, и рамка, и точка статуса */
   .acard.waiting {
     border-color: #8a6d20;
-    animation: glow 1.6s ease-in-out infinite;
+    animation: glow 1.4s ease-in-out infinite;
   }
   @keyframes glow {
-    0%, 100% { box-shadow: 0 10px 30px rgba(0,0,0,0.45), 0 0 10px rgba(232,180,75,0.12); }
-    50% { box-shadow: 0 10px 30px rgba(0,0,0,0.45), 0 0 26px rgba(232,180,75,0.35); }
+    0%, 100% {
+      border-color: #8a6d20;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.45), 0 0 10px rgba(232,180,75,0.14);
+    }
+    50% {
+      border-color: #e8b44b;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.45), 0 0 34px rgba(232,180,75,0.5);
+    }
   }
   .acard.parked { border-style: dashed; border-color: #3a4a55; }
   .acard.parked .acard-body { color: #6d7d86; font-style: italic; }
@@ -250,7 +258,11 @@
 
   .st { width: 9px; height: 9px; border-radius: 50%; flex: none; }
   .st.working { background: #5bd98a; animation: pulse 1.7s infinite; }
-  .st.waiting { background: #e8b44b; }
+  .st.waiting { background: #e8b44b; animation: blink 1.4s ease-in-out infinite; }
+  @keyframes blink {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(232,180,75,0.55); }
+    50% { opacity: 0.55; box-shadow: 0 0 0 4px rgba(232,180,75,0); }
+  }
   .st.idle { background: #55625b; }
   .st.parked { background: #46626f; }
   @keyframes pulse {
@@ -259,8 +271,8 @@
     100% { box-shadow: 0 0 0 0 rgba(91,217,138,0); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .st.working { animation: none; }
-    .acard.waiting { animation: none; }
+    .st.working, .st.waiting { animation: none; }
+    .acard.waiting { animation: none; border-color: #e8b44b; }
     .wbadge { animation: none; }
     .acard.born, .acard.born::after, .umsg.grow, .st.rip, .ldr i, .acard-body.fresh { animation: none; }
     .gmsg, .acard-body .old { transition: none; }
@@ -489,6 +501,20 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   #popover .po-empty { padding: 14px 12px; color: #5f7a6b; }
+  /* легенда: те же самые точки, что на карточках, — вплоть до анимации */
+  #popover .po-leg {
+    display: flex; align-items: flex-start; gap: 9px;
+    padding: 7px 12px; max-width: 280px;
+  }
+  #popover .po-leg > .st { margin-top: 4px; }
+  #popover .po-leg > .ext-tag {
+    font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 5px; flex: none;
+    color: #7d8f85; border: 1px dashed #33413a;
+  }
+  #popover .po-leg-copy { display: grid; gap: 1px; min-width: 0; }
+  #popover .po-leg-copy b { font-size: 11.5px; color: #cfe0d6; }
+  #popover .po-leg-copy i { font-style: normal; font-size: 10.5px; color: #6d8377; }
   /* попап «＋ агент» — по центру, доска под ним притемняется */
   #dim { position: fixed; inset: 0; z-index: 59; background: rgba(4,8,6,0.55); display: none; }
   #dim.show { display: block; }
@@ -770,6 +796,9 @@
     <span class="gbadge" id="gbadge" hidden><i class="gdot"></i><span id="gbadgeText"></span></span>
     <span class="wbadge" id="wbadge" hidden><i class="wdot"></i><span id="wbadgeText"></span></span>
     <button class="top-btn" id="topPlus"><svg class="plus-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><i class="seed"></i><span id="topPlusLabel">agent</span></button>
+    <button class="top-btn ghost icon-btn" id="topLegend" title="what the colours mean">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.3 2.4c-.6.2-.9.7-.9 1.3v.4"/><circle cx="12" cy="17" r="0.6" fill="currentColor"/></svg>
+    </button>
     <button class="top-btn ghost icon-btn" id="topTidy" title="arrange the cards in a grid">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/></svg>
     </button>
@@ -822,6 +851,13 @@
       newAgent: 'agent',
       histTitle: 'revive an agent from history',
       tidyTitle: 'arrange the cards in a grid',
+      legendTitle: 'what the colours mean',
+      legendHead: 'card colours',
+      legWorking: 'running right now',
+      legWaiting: 'waiting for your answer — blinks until you deal with it',
+      legIdle: 'finished, sitting idle',
+      legParked: 'paused: no process, the conversation can be resumed',
+      legExternal: 'started outside the board — watch only, or take it over',
       aliveProc: 'process',
       aliveConv: 'conversation',
       settingsTitle: 'settings',
@@ -892,6 +928,13 @@
       newAgent: 'агент',
       histTitle: 'воскресить агента из истории',
       tidyTitle: 'разложить карточки по сетке',
+      legendTitle: 'что значат цвета',
+      legendHead: 'цвета карточек',
+      legWorking: 'работает прямо сейчас',
+      legWaiting: 'ждёт твоего ответа — мигает, пока не разберёшься',
+      legIdle: 'закончил, простаивает',
+      legParked: 'на паузе: процесса нет, разговор можно продолжить',
+      legExternal: 'запущен мимо доски — только смотреть либо забрать',
       aliveProc: 'процесс',
       aliveConv: 'разговор',
       settingsTitle: 'настройки',
@@ -970,6 +1013,7 @@
     set('topPlusLabel', 'textContent', t('newAgent'));
     set('topHist', 'title', t('histTitle'));
     set('topTidy', 'title', t('tidyTitle'));
+    set('topLegend', 'title', t('legendTitle'));
     set('topSettings', 'title', t('settingsTitle'));
     const emptyBox = document.querySelector('#empty > div');
     if (emptyBox) emptyBox.innerHTML = t('boardEmpty');
@@ -1826,6 +1870,22 @@
   document.getElementById('topTidy').addEventListener('click', () => {
     hidePopover();
     tidy();
+  });
+  document.getElementById('topLegend').addEventListener('click', e => {
+    if (popoverOpen('legend')) { hidePopover(); return; }
+    const row = (cls, label, text) =>
+      '<div class="po-leg"><span class="st ' + cls + '"></span>' +
+      '<span class="po-leg-copy"><b>' + esc(label) + '</b>' +
+      '<i>' + esc(text) + '</i></span></div>';
+    showPopover(e.currentTarget.getBoundingClientRect().right, 44,
+      '<div class="po-head">' + t('legendHead') + '</div>' +
+      row('working', t('stWorking'), t('legWorking')) +
+      row('waiting', t('stNeedsYou'), t('legWaiting')) +
+      row('idle', t('stDone'), t('legIdle')) +
+      row('parked', t('stPaused'), t('legParked')) +
+      '<div class="po-leg"><span class="ext-tag">' + t('external') + '</span>' +
+      '<span class="po-leg-copy"><i>' + esc(t('legExternal')) + '</i></span></div>');
+    popover.dataset.owner = 'legend';
   });
   document.getElementById('topPlus').addEventListener('click', () => {
     if (popoverOpen('plus')) { hidePopover(); return; }
