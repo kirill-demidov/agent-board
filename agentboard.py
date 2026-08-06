@@ -164,6 +164,39 @@ def hook_status(name):
         return "", 0
 
 
+started_cache = {}  # путь jsonl -> когда разговор начался
+
+
+def log_started(path):
+    """Timestamp первой записи разговора. Первая строка файла уже не изменится,
+    так что кешируем навсегда. Компакшн форкает разговор в новый файл — там
+    отсчёт начнётся заново, это и есть новый разговор."""
+    if not path:
+        return 0
+    if path in started_cache:
+        return started_cache[path]
+    stamp = 0
+    try:
+        with open(path, errors="ignore") as f:
+            for _ in range(50):  # в голове файла попадаются служебные записи
+                line = f.readline()
+                if not line:
+                    break
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                raw = row.get("timestamp")
+                if raw:
+                    stamp = int(datetime.fromisoformat(
+                        raw.replace("Z", "+00:00")).timestamp())
+                    break
+    except OSError:
+        return 0
+    started_cache[path] = stamp
+    return stamp
+
+
 def log_activity(path, record_types=()):
     """Timestamp последнего настоящего события внутри JSONL, а не mtime файла."""
     try:
@@ -1713,6 +1746,9 @@ def get_agents():
         a["logo"] = logo_version(a["path"])
         if card["id"]:
             session_path = find_session_file(card["cwd"], card["id"])
+            # разговор переживает процесс: перехват из чужого терминала поднимает
+            # новый CLI, но тот же лог — на карточке видно оба возраста
+            a["started"] = log_started(session_path)
             a["activity"] = log_activity(session_path, ("user", "assistant")) or a["activity"]
             found_model = log_model(session_path, "claude")
             if found_model:

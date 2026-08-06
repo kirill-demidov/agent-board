@@ -822,8 +822,8 @@
       newAgent: 'agent',
       histTitle: 'revive an agent from history',
       tidyTitle: 'arrange the cards in a grid',
-      alive: 'alive',
-      aliveTitle: 'how long this session has been running',
+      aliveProc: 'process',
+      aliveConv: 'conversation',
       settingsTitle: 'settings',
       boardEmpty: 'The board is empty.<br>Hit <code>＋ agent</code> — pick a project, describe a task; the agent appears as a tile<br>and blinks when it finishes or asks you something.',
       all: 'all',
@@ -892,8 +892,8 @@
       newAgent: 'агент',
       histTitle: 'воскресить агента из истории',
       tidyTitle: 'разложить карточки по сетке',
-      alive: 'живёт',
-      aliveTitle: 'сколько времени работает эта сессия',
+      aliveProc: 'процесс',
+      aliveConv: 'разговор',
       settingsTitle: 'настройки',
       boardEmpty: 'Доска пустая.<br>Жми <code>＋ агент</code> — выбери проект, напиши задачу, агент появится плиткой<br>и замигает, когда закончит или спросит.',
       all: 'все',
@@ -1286,13 +1286,17 @@
     const activity = a.activity
       ? fmtAge(Math.max(0, Math.floor(Date.now() / 1000 - a.activity))) + ' ' + t('ago')
       : '';
-    // сколько живёт сессия: у карточки на паузе процесса нет — и возраста тоже
-    const alive = (a.created && status !== 'parked')
-      ? fmtAge(Math.max(0, Math.floor(Date.now() / 1000 - a.created)))
-      : '';
+    // два возраста: процесс и разговор. Перехваченная сессия — новый CLI на
+    // старом логе, у карточки на паузе процесса нет вовсе
+    const secs = ts => Math.max(0, Math.floor(Date.now() / 1000 - ts));
+    const proc = (a.created && status !== 'parked') ? fmtAge(secs(a.created)) : '';
+    // минута расхождения — это округление, а не другой возраст
+    const conv = (a.started && (!a.created || a.created - a.started > 60))
+      ? fmtAge(secs(a.started)) : '';
     const age = el.querySelector('.age');
-    age.textContent = alive;
-    age.title = alive ? t('aliveTitle') : '';
+    age.textContent = [proc, conv].filter(Boolean).join(' / ');
+    age.title = [proc && t('aliveProc') + ' ' + proc,
+                 conv && t('aliveConv') + ' ' + conv].filter(Boolean).join(' · ');
     const activeStatus = status === 'working' ? statusLabel : '';
     const model = a.model || t('modelUnknown');
     const tip = [a.project, model, activeStatus, activity].filter(Boolean).join(' · ');
@@ -1301,7 +1305,7 @@
     meta.querySelector('.meta-tip-main').textContent =
       [model, activeStatus].filter(Boolean).join(' · ');
     meta.querySelector('.meta-tip-time').textContent =
-      [alive ? t('alive') + ' ' + alive : '', activity].filter(Boolean).join(' · ');
+      [age.title, activity].filter(Boolean).join(' · ');
     const body = el.querySelector('.acard-body');
     if (dragging !== a.name && !justSent && body.dataset.raw !== a.preview) {
       // если юзер прокрутил вверх — не дёргаем его; если был внизу — держим низ
