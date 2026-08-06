@@ -1,5 +1,44 @@
 # Agent Board
 
+> ### This is a fork
+>
+> Forked from **[mikky-a/agentboard](https://github.com/mikky-a/agentboard)**,
+> MIT-licensed, copyright held by its author — see [LICENSE](LICENSE). Upstream
+> is the original and the place to look for releases; this fork exists to
+> scratch a few personal itches and is not a competing product.
+>
+> **What is different here**
+>
+> - **Cross-origin requests to the local API are refused.** The board binds
+>   127.0.0.1, but a browser hands that origin to any open tab, and every
+>   mutating route is a plain GET — so a web page could start an agent in your
+>   repo or type into a live session. Rejected by `Sec-Fetch-Site`, `Origin`
+>   and `Host` (DNS rebinding). Worth pulling upstream.
+> - **Sessions started outside the board are visible.** Claude registers live
+>   sessions in `~/.claude/sessions`, so agents launched by hand in a terminal,
+>   VS Code or Cursor appear as read-only cards labelled with the app hosting
+>   them — and can be taken over: the board kills the external process and
+>   resumes the same conversation in a tmux session it controls.
+> - **Full-text search over every conversation**, reusing the FTS5 index kept by
+>   a local `~/.claude/cc-history` tool — opened read-only, refreshed by running
+>   that tool's own indexer, and absent without it. A hit opens in one click.
+> - **Both ages on a card** — how long the process has run and how long the
+>   conversation has existed, which stop matching once a session is taken over.
+> - **A card centres and grows while you talk to it**, instead of typing into a
+>   280px tile wherever it happens to sit.
+> - **A tidy button** packs drifted cards into columns by project.
+> - **`AGENTBOARD_TERMINAL`** picks the app that opens a session; Warp gets a
+>   launch configuration since it reads neither `.command` files nor AppleScript.
+> - **`AGENTBOARD_SELFNAME=0`** keeps the board out of the agent's global memory
+>   (`~/.claude/CLAUDE.md` and friends) at the cost of derived card titles.
+> - Fixes: cyrillic no longer arrives as mojibake when sent from the board (the
+>   packaged app inherits no `LC_*` from Finder); top-bar buttons no longer get
+>   pushed off screen by a long row of project chips; a server that dies after
+>   the page has loaded is noticed and restarted.
+>
+> Packaged builds bundle CPython (PSF), tmux (ISC), libevent (BSD-3) and
+> utf8proc (MIT) — their licences apply to the DMG, not to this source tree.
+
 **Spatial board for Claude Code, Codex, Cursor and opencode.** One card is one
 conversation: start agents into any project folder, drag the cards wherever they
 make sense, and see at a glance who is working, who finished, and who is waiting
