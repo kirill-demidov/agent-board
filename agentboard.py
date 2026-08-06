@@ -246,9 +246,16 @@ HOOK_EVENTS = {  # событие CLI -> статус на доске
 
 
 def hook_cmd(status):
-    return ('[ -n "$TMUX" ] && mkdir -p ~/.claude/agent-status && '
-            f'echo {status} > ~/.claude/agent-status/"$(tmux display -p \'#S\')"'
-            '; true')
+    """Команда хука: пишет статус и для tmux-агента, и для сессии вне его.
+
+    Внутри tmux ключ — имя сессии (его знает и tmux, и доска). Снаружи tmux
+    ничего общего нет, кроме sessionId: он приходит хуку в JSON на stdin,
+    вытаскиваем его sed'ом (jq есть не у всех, python3 на каждый PreToolUse
+    дороговат). Ключ такой записи — ext-<sessionId>, как в external_agents."""
+    return ('d=~/.claude/agent-status; mkdir -p "$d"; '
+            's=$(tr -d "\\n" | sed -n \'s/.*"session_id"[^"]*"\\([^"]*\\)".*/\\1/p\'); '
+            f'[ -n "$TMUX" ] && echo {status} > "$d/$(tmux display -p \'#S\')"; '
+            f'[ -n "$s" ] && echo {status} > "$d/ext-$s"; true')
 
 
 def _hooks_missing(cfg):
@@ -466,14 +473,18 @@ def _install_into(path, extra=None):
         return False
     changed = False
     hooks = cfg.setdefault("hooks", {})
-    # наш старый Notification-хук с грепом по тексту — убираем, он и был поломкой
-    for grp in list(hooks.get("Notification", []) or []):
-        cmds = [h.get("command", "") for h in grp.get("hooks", []) or []]
-        if any(HOOK_MARK in c and "grep" in c for c in cmds):
-            hooks["Notification"].remove(grp)
-            if not hooks["Notification"]:
-                del hooks["Notification"]
-            changed = True
+    # свои хуки прежних версий убираем целиком: старый Notification с грепом по
+    # тексту (он и был поломкой) и всё, что не совпало с текущей командой, —
+    # иначе обновление доски не доезжает, _hooks_missing видит метку и молчит
+    fresh = {hook_cmd(s) for s in HOOK_EVENTS.values()}
+    for ev in list(hooks):
+        for grp in list(hooks.get(ev) or []):
+            cmds = [h.get("command", "") for h in grp.get("hooks", []) or []]
+            if any(HOOK_MARK in c and c not in fresh for c in cmds):
+                hooks[ev].remove(grp)
+                if not hooks[ev]:
+                    del hooks[ev]
+                changed = True
     for ev in _hooks_missing(cfg):
         entry = {"type": "command", "command": hook_cmd(HOOK_EVENTS[ev])}
         if extra:
@@ -731,6 +742,88 @@ def pane_pids(name):
         found.update(kids)
         pids = kids
     return found
+
+
+# ---------- сессии, запущенные мимо доски ----------
+# Клод сам ведёт реестр живых сессий: ~/.claude/sessions/<pid>.json с cwd,
+# sessionId и статусом. Оттуда берём агентов, которых пользователь поднял в
+# обычном терминале, — доска показывает их наравне со своими, только смотреть:
+# tmux-сессии у них нет, значит ни attach, ни отправки текста.
+
+EXT_PREFIX = "ext-"  # префикс имени карточки; tmux-сессии так называться не могут
+proc_start_cache = {}  # pid -> время старта по данным ps
+
+
+def _proc_start(pid):
+    """Момент старта процесса, эпоха. Сравнивать строки нельзя: реестр пишет
+    procStart в UTC, а ps печатает локальное время — расходятся на смещение."""
+    if pid in proc_start_cache:
+        return proc_start_cache[pid]
+    stamp = 0.0
+    try:
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                           capture_output=True, text=True, timeout=5)
+        stamp = time.mktime(time.strptime(" ".join(r.stdout.split()),
+                                          "%a %b %d %H:%M:%S %Y"))
+    except Exception:
+        pass
+    proc_start_cache[pid] = stamp
+    return stamp
+
+
+def _rec_alive(rec):
+    """Запись реестра описывает живой процесс, а не переиспользованный pid."""
+    pid = rec.get("pid")
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except (OSError, ValueError, TypeError):
+        proc_start_cache.pop(pid, None)
+        return False
+    # регистрация идёт сразу за стартом процесса; разъехались на минуты —
+    # значит pid переиспользован и за записью стоит кто-то другой
+    started = (rec.get("startedAt") or 0) / 1000
+    real = _proc_start(pid)
+    return not (started and real) or abs(started - real) < 300
+
+
+def external_agents(busy_pids):
+    """Живые сессии клода вне tmux — карточками того же вида, что и tmux-агенты.
+
+    busy_pids — всё, что уже крутится внутри tmux-сессий: их доска показывает
+    обычным путём, с превью панели и управлением."""
+    agents = []
+    now = time.time()
+    for rec in session_records():
+        if rec.get("kind") != "interactive" or str(rec.get("pid")) in busy_pids:
+            continue
+        cwd, sid = rec.get("cwd") or "", rec.get("sessionId") or ""
+        if not cwd or not sid or not _rec_alive(rec):
+            continue
+        # хук ставит waiting по событию разрешения; сам реестр про вопрос
+        # не знает, у него только busy/idle
+        hook, hook_at = hook_status(EXT_PREFIX + sid)
+        if hook == "waiting":
+            status = "waiting"
+        elif rec.get("status") == "busy":
+            status = "working"
+        else:
+            status = "idle"
+        _, title = cached_meta(find_session_file(cwd, sid))
+        agents.append({
+            "name": EXT_PREFIX + sid,
+            "project": os.path.basename(cwd.rstrip("/")) or sid[:8],
+            "path": cwd,
+            "attached": False,
+            "created": int((rec.get("startedAt") or 0) / 1000),
+            "status": status,
+            "preview": title or rec.get("name") or "",
+            "activity": int((rec.get("updatedAt") or 0) / 1000) or int(now),
+            "hook_at": hook_at if hook == "waiting" else 0,
+            "external": True,
+        })
+    return agents
 
 
 # ---------- история разговоров Claude Code ----------
@@ -1319,12 +1412,14 @@ def get_live():
     rows = tmux("list-sessions", "-F",
                 "#{session_name}\t#{session_path}\t#{session_attached}\t#{session_created}")
     agents = []
+    busy_pids = set()
     now = time.time()
     for line in rows.splitlines():
         parts = line.split("\t")
         if len(parts) < 4:
             continue
         name, path, attached, created = parts
+        busy_pids |= pane_pids(name)
         pane = tmux("capture-pane", "-p", "-t", name, "-S", "-2000")
         content = []
         tip_wrap = False  # Tip: переносится на несколько строк — режем весь абзац
@@ -1383,6 +1478,7 @@ def get_live():
             # отлеплять протухший waiting по активности структурного лога
             "hook_at": hook_at if hook == "waiting" else 0,
         })
+    agents += external_agents(busy_pids)
     update_caffeinate(any(a["status"] == "working" for a in agents))
     return agents
 
@@ -1518,34 +1614,39 @@ def get_agents():
                 lines = [l.strip() for l in pane_preview.splitlines() if l.strip()]
                 a["preview"] = "\n".join(lines[-10:])
             continue
-        # точная привязка: PID процесса claude внутри панели -> sessionId
-        pids = pane_pids(a["name"])
-        rec = next((r for r in recs
-                    if str(r.get("pid")) in pids and r.get("sessionId")), None)
-        sid = rec["sessionId"] if rec else card["id"]
-        # компакшн/суммаризация форкают разговор в НОВЫЙ файл на ходу, а pid->session
-        # у claude при этом не обновляется — карточка застывала на старом. Следуем за
-        # более свежим разговором той же папки (не заглатывая сессии других живых
-        # карточек и недавно закрытые). Активную сессию это не трогает: её файл и есть
-        # самый свежий, так что подхватывается только осиротевший после форка.
-        known = ({c["id"] for c in cards_list if c is not card and c.get("id")} |
-                 {c["id"] for c in board["closed"] if c.get("id")})
-        # id чужих карточек появляются с задержкой (свежая сессия ещё без id),
-        # а pid-файлы пишутся мгновенно: сессию, на которую претендует любой
-        # другой живой pid, не заглатываем. Исключение — bg-форк нашего же
-        # разговора (Agent View): это не чужая карточка, а его продолжение.
-        # Форков в pid-файлах не бывает (они там не обновляются — в этом и был
-        # баг), так что форк подхватится.
-        known |= {r["sessionId"] for r in recs
-                  if r.get("sessionId") and str(r.get("pid")) not in pids
-                  and not bg_fork_of(r, sid)}
-        cand, _ = newest_session(a["path"], a["created"], known)
-        if cand and cand != sid:
-            cur_f = find_session_file(a["path"], sid) if sid else ""
-            cur_m = log_activity(cur_f, ("user", "assistant")) if cur_f else 0
-            if log_activity(find_session_file(a["path"], cand),
-                            ("user", "assistant")) > cur_m:
-                sid = cand
+        if a.get("external"):
+            # разговор известен из реестра клода: pane_pids звать нельзя
+            # (tmux-сессии у карточки нет), да и угадывать нечего
+            sid = a["name"][len(EXT_PREFIX):]
+        else:
+            # точная привязка: PID процесса claude внутри панели -> sessionId
+            pids = pane_pids(a["name"])
+            rec = next((r for r in recs
+                        if str(r.get("pid")) in pids and r.get("sessionId")), None)
+            sid = rec["sessionId"] if rec else card["id"]
+            # компакшн/суммаризация форкают разговор в НОВЫЙ файл на ходу, а pid->session
+            # у claude при этом не обновляется — карточка застывала на старом. Следуем за
+            # более свежим разговором той же папки (не заглатывая сессии других живых
+            # карточек и недавно закрытые). Активную сессию это не трогает: её файл и есть
+            # самый свежий, так что подхватывается только осиротевший после форка.
+            known = ({c["id"] for c in cards_list if c is not card and c.get("id")} |
+                     {c["id"] for c in board["closed"] if c.get("id")})
+            # id чужих карточек появляются с задержкой (свежая сессия ещё без id),
+            # а pid-файлы пишутся мгновенно: сессию, на которую претендует любой
+            # другой живой pid, не заглатываем. Исключение — bg-форк нашего же
+            # разговора (Agent View): это не чужая карточка, а его продолжение.
+            # Форков в pid-файлах не бывает (они там не обновляются — в этом и был
+            # баг), так что форк подхватится.
+            known |= {r["sessionId"] for r in recs
+                      if r.get("sessionId") and str(r.get("pid")) not in pids
+                      and not bg_fork_of(r, sid)}
+            cand, _ = newest_session(a["path"], a["created"], known)
+            if cand and cand != sid:
+                cur_f = find_session_file(a["path"], sid) if sid else ""
+                cur_m = log_activity(cur_f, ("user", "assistant")) if cur_f else 0
+                if log_activity(find_session_file(a["path"], cand),
+                                ("user", "assistant")) > cur_m:
+                    sid = cand
         if sid and sid != card["id"]:
             card["id"] = sid
             _, card["title"] = cached_meta(find_session_file(card["cwd"], sid))
