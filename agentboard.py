@@ -1779,26 +1779,10 @@ def get_agents():
                 a["preview"] = tp
 
     # ---- «требует тебя»: то, что зажигает счётчик на иконке ----
-    # Диалог разрешения — очевидный случай. Второй, не менее важный: агент
-    # доработал и молчит в ожидании ответа. Ловим именно ПЕРЕХОД в idle, а не
-    # сам факт простоя, иначе метка висела бы вечно на всём законченном.
+    # Только диалог разрешения. Законченную работу сюда не считаем: агент,
+    # который отработал и молчит, ничего от тебя не требует.
     for a in live:
-        card = by_tmux.get(a["name"])
-        if card is None:
-            continue
-        was = card.get("last_status", "")
-        if a["status"] != was:
-            if was in ("working", "waiting") and a["status"] == "idle":
-                card["done_at"] = int(time.time())
-            card["last_status"] = a["status"]
-            changed = True
-        # к сессии подключён терминал — ты и так на неё смотришь
-        if a["status"] == "idle" and a.get("attached"):
-            if card.get("done_at", 0) > card.get("seen", 0):
-                card["seen"] = card["done_at"]
-                changed = True
-        a["attention"] = (a["status"] == "waiting"
-                          or card.get("done_at", 0) > card.get("seen", 0))
+        a["attention"] = a["status"] == "waiting"
 
     agents = live
     for card in list(cards_list):
@@ -2329,22 +2313,6 @@ def search_history(query, limit=25):
 
 
 @locked
-def mark_seen(name="", cid=""):
-    """Ты отреагировал на карточку — гасим её метку внимания. Зовётся отовсюду,
-    где действие означает «я это увидел»: открыл терминал, ответил, забрал."""
-    if not name and not cid:
-        return False
-    board = load_board()
-    now, hit = int(time.time()), False
-    for c in board["cards"]:
-        if (name and c.get("tmux") == name) or (cid and c.get("id") == cid):
-            c["seen"], hit = now, True
-    if hit:
-        save_board(board)
-    return hit
-
-
-@locked
 def adopt_external(sid):
     """Забрать сессию из чужого приложения: гасим её процесс и продолжаем тот
     же разговор своей tmux-сессией.
@@ -2565,10 +2533,8 @@ class Handler(BaseHTTPRequestHandler):
         elif url.path == "/api/add":
             self.ok(add_from_history(arg("id"), arg("cwd"), arg("project"), arg("title")))
         elif url.path == "/api/resume":
-            mark_seen("", arg("id"))
             self.ok(resume_card(arg("id")))
         elif url.path == "/api/adopt":
-            mark_seen("", arg("id"))
             self.ok(adopt_external(arg("id")))
         elif url.path == "/api/reindex":
             self.send(200, json.dumps({"ran": reindex_history()}))
@@ -2581,13 +2547,9 @@ class Handler(BaseHTTPRequestHandler):
                                   arg("agent") or "claude",
                                   arg("model"), arg("effort")))
         elif url.path == "/api/send":
-            mark_seen(arg("s"))
             self.ok(send_to_agent(arg("s"), arg("text")))
-        elif url.path == "/api/seen":
-            self.ok(mark_seen(arg("s"), arg("id")))
         elif url.path == "/api/open":
             if tmux_ok("has-session", "-t", arg("s")):
-                mark_seen(arg("s"))
                 open_in_terminal(arg("s"))
                 self.ok()
             else:

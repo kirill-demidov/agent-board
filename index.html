@@ -240,19 +240,6 @@
       box-shadow: 0 10px 30px rgba(0,0,0,0.45), 0 0 34px rgba(232,180,75,0.5);
     }
   }
-  /* доработал и ждёт ответа: зелёным, а не жёлтым — это не срочно, но новое.
-     Точка пульсирует, чтобы её было видно среди десятка тихих карточек */
-  .acard.unseen { border-color: #2e7a52; }
-  .acard.unseen .name::before {
-    content: ''; flex: none; margin-right: 7px;
-    width: 8px; height: 8px; border-radius: 50%;
-    background: #5bd98a;
-    animation: newdot 1.5s ease-in-out infinite;
-  }
-  @keyframes newdot {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(91,217,138,0.55); opacity: 1; }
-    50% { box-shadow: 0 0 0 5px rgba(91,217,138,0); opacity: 0.5; }
-  }
   .acard.parked { border-style: dashed; border-color: #3a4a55; }
   .acard.parked .acard-body { color: #6d7d86; font-style: italic; }
 
@@ -307,7 +294,7 @@
     100% { box-shadow: 0 0 0 0 rgba(91,217,138,0); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .st.working, .st.waiting, .acard.unseen .name::before { animation: none; }
+    .st.working, .st.waiting { animation: none; }
     .acard.waiting { animation: none; border-color: #e8b44b; }
     .wbadge { animation: none; }
     .acard.born, .acard.born::after, .umsg.grow, .st.rip, .ldr i, .acard-body.fresh { animation: none; }
@@ -543,10 +530,6 @@
     padding: 7px 12px; max-width: 280px;
   }
   #popover .po-leg > .st { margin-top: 4px; }
-  #popover .po-leg-new {
-    flex: none; margin-top: 4px; width: 9px; height: 9px; border-radius: 50%;
-    background: #5bd98a; animation: newdot 1.5s ease-in-out infinite;
-  }
   #popover .po-leg > .ext-tag {
     font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase;
     padding: 2px 6px; border-radius: 5px; flex: none;
@@ -556,6 +539,18 @@
   #popover .po-leg-copy b { font-size: 11.5px; color: #cfe0d6; }
   #popover .po-leg-copy i { font-style: normal; font-size: 10.5px; color: #6d8377; }
   /* попап «＋ агент» — по центру, доска под ним притемняется */
+  /* режим разговора: пишешь агенту — карточка выходит в центр и растёт,
+     доска притемняется. Место на доске за ней сохраняется (inline left/top
+     прячем в data-, чтобы вернуть как было) */
+  .acard.focus {
+    position: fixed !important;
+    left: 50% !important; top: 50% !important;
+    transform: translate(-50%, -50%);
+    width: min(640px, 88vw); z-index: 60;
+    box-shadow: 0 24px 70px rgba(0,0,0,0.6), 0 0 0 1px #2e7a52;
+  }
+  .acard.focus .acard-body { max-height: min(52vh, 560px); }
+  .acard.focus .cmp-in textarea { min-height: 68px; }
   #dim { position: fixed; inset: 0; z-index: 59; background: rgba(4,8,6,0.55); display: none; }
   #dim.show { display: block; }
   #popover.center {
@@ -901,8 +896,6 @@
       legWorking: 'running right now',
       legWaiting: 'waiting for your answer — blinks until you deal with it',
       legIdle: 'finished, sitting idle',
-      legUnseenName: 'needs you',
-      legUnseen: 'finished since you last looked — counted on the dock icon; click the card to clear',
       legParked: 'paused: no process, the conversation can be resumed',
       legExternal: 'started outside the board — watch only, or take it over',
       aliveProc: 'process',
@@ -983,8 +976,6 @@
       legWorking: 'работает прямо сейчас',
       legWaiting: 'ждёт твоего ответа — мигает, пока не разберёшься',
       legIdle: 'закончил, простаивает',
-      legUnseenName: 'ждёт реакции',
-      legUnseen: 'закончил с прошлого твоего взгляда — считается в бейдже на иконке; клик по карточке снимает',
       legParked: 'на паузе: процесса нет, разговор можно продолжить',
       legExternal: 'запущен мимо доски — только смотреть либо забрать',
       aliveProc: 'процесс',
@@ -1222,6 +1213,37 @@
     setTimeout(() => canvas.classList.remove('tidying'), 450);
   }
 
+  // ---------- режим разговора: одна карточка в центре ----------
+  function focusCard(el) {
+    if (el.classList.contains('focus')) return;
+    document.querySelectorAll('.acard.focus').forEach(unfocusCard);
+    // inline-координаты мешают fixed-центрированию — убираем, запомнив
+    el.dataset.restore = el.style.left + '|' + el.style.top;
+    el.style.left = el.style.top = '';
+    el.classList.add('focus');
+    dim.classList.add('show');
+  }
+
+  function unfocusCard(el) {
+    if (!el.classList.contains('focus')) return;
+    el.classList.remove('focus', 'open-in');
+    const [x, y] = (el.dataset.restore || '|').split('|');
+    el.style.left = x;
+    el.style.top = y;
+    delete el.dataset.restore;
+    if (!document.querySelector('.acard.focus') &&
+        !popover.classList.contains('center')) dim.classList.remove('show');
+  }
+
+  function unfocusAll() {
+    document.querySelectorAll('.acard.focus').forEach(unfocusCard);
+  }
+
+  dim.addEventListener('pointerdown', unfocusAll);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') unfocusAll();
+  });
+
   // ---------- карточки ----------
   function makeCard(agent) {
     const el = document.createElement('div');
@@ -1244,17 +1266,9 @@
     el.style.left = p.x + 'px';
     el.style.top = p.y + 'px';
 
-    // клик по карточке = «увидел»: гасим метку внимания и бейдж в доке
-    el.addEventListener('pointerdown', () => {
-      if (!el.classList.contains('unseen')) return;
-      el.classList.remove('unseen');
-      const a = lastAgents.find(x => x.name === el.dataset.name);
-      api('seen?s=' + encodeURIComponent(el.dataset.name) +
-          '&id=' + encodeURIComponent((a && a.cid) || ''));
-    }, true);
-
     el.addEventListener('pointerdown', e => {
       // тело скроллится, текст названия — для dblclick; остальное таскает
+      if (el.classList.contains('focus')) return;   // в центре её не двигают
       if (e.target.tagName === 'BUTTON' || e.target.classList.contains('ntext')
           || e.target.closest('.acard-body') || e.target.closest('.cmp-in')) return;
       e.preventDefault();
@@ -1357,8 +1371,6 @@
     el.classList.toggle('waiting', status === 'waiting');
     el.classList.toggle('parked', status === 'parked');
     el.classList.toggle('external', !!a.external);
-    // закончил, а ты ещё не смотрел: то же, что считает бейдж в доке
-    el.classList.toggle('unseen', !!a.attention && status !== 'waiting');
     if (!el.dataset.editing)
       el.querySelector('.ntext').textContent =
         a.label || a.sname || (a.status === 'parked' ? a.project : a.name);
@@ -1538,8 +1550,12 @@
     if (act === 'open') api('open?s=' + encodeURIComponent(a.name));
     if (act === 'reply') {
       card.classList.toggle('open-in');
-      if (card.classList.contains('open-in'))
+      if (card.classList.contains('open-in')) {
+        focusCard(card);
         card.querySelector('.cmp-in textarea').focus();
+      } else {
+        unfocusCard(card);
+      }
       return;
     }
     if (act === 'remove')
@@ -2010,9 +2026,6 @@
       row('working', t('stWorking'), t('legWorking')) +
       row('waiting', t('stNeedsYou'), t('legWaiting')) +
       row('idle', t('stDone'), t('legIdle')) +
-      '<div class="po-leg"><span class="po-leg-new"></span>' +
-      '<span class="po-leg-copy"><b>' + esc(t('legUnseenName')) + '</b>' +
-      '<i>' + esc(t('legUnseen')) + '</i></span></div>' +
       row('parked', t('stPaused'), t('legParked')) +
       '<div class="po-leg"><span class="ext-tag">' + t('external') + '</span>' +
       '<span class="po-leg-copy"><i>' + esc(t('legExternal')) + '</i></span></div>');
