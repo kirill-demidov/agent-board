@@ -68,9 +68,16 @@
   }
   .ver { color: #3f4c45; font-size: 11px; }
   /* чипы-папки: серые, пока не выбраны; прячутся, если проект один */
-  .chips { display: flex; align-items: center; gap: 2px; }
+  /* проектов бывает много: ряд чипсов ужимается и прокручивается сам,
+     иначе он распирает шапку и выдавливает кнопки за край окна */
+  .chips {
+    display: flex; align-items: center; gap: 2px;
+    min-width: 0; overflow-x: auto; scrollbar-width: none;
+  }
+  .chips::-webkit-scrollbar { display: none; }
+  .topbar > .top-btn, .topbar > .ver, .topbar > b { flex: none; }
   .chip {
-    font: inherit; font-size: 12px;
+    font: inherit; font-size: 12px; flex: none; white-space: nowrap;
     padding: 2px 9px; border-radius: 99px; cursor: pointer;
     background: transparent; border: 1px solid transparent; color: #5f7a6b;
   }

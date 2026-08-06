@@ -139,9 +139,22 @@ MODEL_LABELS = {
 }
 
 
+# Из Finder приложение стартует с обрезанным окружением: ни LANG, ни LC_*.
+# Без них tmux считает терминал 8-битным и разбирает UTF-8 побайтно — кириллица
+# в send-keys превращается в «ÑÐºÐ°Ð¶Ð¸». Правим только LC_CTYPE: он отвечает
+# за кодировку и не трогает язык сообщений самих агентов.
+TMUX_ENV = dict(os.environ)
+if not any(TMUX_ENV.get(k) for k in ("LC_ALL", "LC_CTYPE", "LANG")):
+    TMUX_ENV["LC_CTYPE"] = "en_US.UTF-8"
+# та же локаль нужна и внутри сессии — иначе её унаследует сам агент
+LOCALE_EXPORT = "export LC_CTYPE=" + shlex.quote(
+    TMUX_ENV.get("LC_ALL") or TMUX_ENV.get("LC_CTYPE") or TMUX_ENV.get("LANG"))
+
+
 def tmux(*args):
     try:
-        r = subprocess.run([*TMUX_CMD, *args], capture_output=True, text=True, timeout=5)
+        r = subprocess.run([*TMUX_CMD, *args], capture_output=True, text=True,
+                           timeout=5, env=TMUX_ENV)
         return r.stdout if r.returncode == 0 else ""
     except Exception:
         return ""
@@ -149,7 +162,8 @@ def tmux(*args):
 
 def tmux_ok(*args):
     try:
-        return subprocess.run([*TMUX_CMD, *args], capture_output=True, timeout=5).returncode == 0
+        return subprocess.run([*TMUX_CMD, *args], capture_output=True,
+                              timeout=5, env=TMUX_ENV).returncode == 0
     except Exception:
         return False
 
@@ -2041,7 +2055,7 @@ def resume_card(cid):
     else:
         cmd = f"{CLAUDE} --resume {shlex.quote(cid)}"
     tmux("new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", card["cwd"],
-         f"export PATH={shlex.quote(AGENT_PATH)}; {cmd}")
+         f"{LOCALE_EXPORT}; export PATH={shlex.quote(AGENT_PATH)}; {cmd}")
     tmux("set-option", "-t", name, "mouse", "on")
     tmux("set-option", "-t", name, "mode-style", "bg=colour236,fg=colour245")
     card["tmux"] = name
@@ -2190,7 +2204,7 @@ def new_agent(cwd, project, prompt="", agent="claude", model="", effort=""):
         else:
             parts.append(full)
     cmd = " ".join(shlex.quote(p) for p in parts)
-    cmd = f"export PATH={shlex.quote(AGENT_PATH)}; {cmd}"
+    cmd = f"{LOCALE_EXPORT}; export PATH={shlex.quote(AGENT_PATH)}; {cmd}"
     # -x/-y: без клиента tmux рожает 80×24 — TUI потом мажет при ресайзе;
     # mouse on: иначе колесо превращается в стрелки и листает историю ввода
     tmux("new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", cwd, cmd)
@@ -2238,7 +2252,7 @@ def adopt_external(sid):
     name = free_name(project)
     pre_trust("claude", cwd)
     tmux("new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", cwd,
-         f"export PATH={shlex.quote(AGENT_PATH)}; "
+         f"{LOCALE_EXPORT}; export PATH={shlex.quote(AGENT_PATH)}; "
          f"{CLAUDE} --resume {shlex.quote(sid)}")
     tmux("set-option", "-t", name, "mouse", "on")
     tmux("set-option", "-t", name, "mode-style", "bg=colour236,fg=colour245")
