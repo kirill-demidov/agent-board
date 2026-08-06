@@ -636,7 +636,16 @@ def _install_md(path):
 # кладём в файл, а забирает её сам шелл новой вкладки: снипет ниже живёт в
 # ~/.zshrc, срабатывает только в Warp, вне tmux и только на свежий файл
 # (иначе случайная вкладка через час подхватила бы забытый attach).
+#
+# Attach нельзя делать на месте, прямо в ~/.zshrc: exec убивает zsh до того,
+# как Warp допишет свой бутстрап, вкладка навсегда остаётся «инициализируется»
+# и ввод не доходит до tmux (клавиши остаются в редакторе блока Warp). Поэтому
+# ждём холостого хода ZLE (zsh/sched) — к этому моменту бутстрап дописан, — и
+# перед exec сами дёргаем preexec-хуки: из них Warp узнаёт, что пошла команда,
+# и отдаёт ей клавиатуру.
 
+# AGENTBOARD_WARP_TABS=0 — не трогать ~/.zshrc и открывать окнами, как раньше
+WARP_TABS = os.environ.get("AGENTBOARD_WARP_TABS", "1") != "0"
 ZSHRC = os.path.expanduser("~/.zshrc")
 WARP_MARK = "# >>> agentboard: Warp tabs >>>"
 WARP_MARK_END = "# <<< agentboard: Warp tabs <<<"
@@ -647,15 +656,31 @@ if [[ -o interactive && "$TERM_PROGRAM" == "WarpTerminal" && -z "$TMUX" \
   _agentboard_age=$(( $(date +%s) - $(stat -f %m {WARP_ATTACH_FILE}) ))
   rm -f {WARP_ATTACH_FILE}
   if [[ -n "$_agentboard_cmd" && $_agentboard_age -lt 30 ]]; then
-    unset _agentboard_age
-    eval "exec $_agentboard_cmd"
+    _agentboard_go() {{
+      local cmd=$_agentboard_cmd hook
+      unset _agentboard_cmd
+      [[ -n "$cmd" ]] || return
+      # Warp следит за командами через preexec — без этого сигнала он думает,
+      # что шелл стоит на промпте, и клавиши до tmux не доходят
+      for hook in ${{preexec_functions[@]}}; do
+        "$hook" "$cmd" "$cmd" "$cmd" 2>/dev/null
+      done
+      eval "exec $cmd"
+    }}
+    if zmodload zsh/sched 2>/dev/null; then
+      sched +1 _agentboard_go     # холостой ход ZLE: бутстрап Warp уже дописан
+    else
+      _agentboard_go              # без sched — хотя бы старым способом
+    fi
   fi
-  unset _agentboard_cmd _agentboard_age
+  unset _agentboard_age
 fi
 {WARP_MARK_END}"""
 
 
 def _warp_zshrc_ok():
+    if not WARP_TABS:
+        return False
     try:
         with open(ZSHRC) as f:
             return WARP_ZSHRC in f.read()
@@ -706,7 +731,7 @@ def install_hooks(selected=None):
     if "opencode" in sel:
         _install_opencode()
         _install_md(OPENCODE_MD)
-    if TERMINAL_APP == "Warp":  # без снипета Warp открывает сессии окнами
+    if TERMINAL_APP == "Warp" and WARP_TABS:  # без снипета Warp открывает окнами
         _install_warp_zshrc()
     return hooks_state()
 

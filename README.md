@@ -152,7 +152,12 @@ pull possible.)
   window: the board drops the `tmux attach` line into
   `/tmp/agentboard-<uid>-warp-attach` and follows
   `warp://action/new_tab?path=<cwd>`, and the new tab's shell picks that line up
-  and `exec`s it. Without the snippet it falls back to a launch configuration in
+  and `exec`s it — one ZLE tick later (`sched`) and after firing the shell's
+  `preexec` hooks, so Warp has finished bootstrapping the shell and knows a
+  command took over the tab; `exec`ing straight from `~/.zshrc` leaves the tab
+  initialising forever and swallows every keystroke. `AGENTBOARD_WARP_TABS=0`
+  keeps the board out of `~/.zshrc` and goes back to windows.
+  Without the snippet it falls back to a launch configuration in
   `~/.warp/launch_configurations/` plus `warp://launch/<name>`, which Warp can
   only open as a new window. Any other
   value is passed to `open -a`, which works for anything that runs `.command`
