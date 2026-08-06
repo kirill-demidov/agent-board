@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var timer: Timer?
     var serverProc: Process?
     var lastWaiting = 0
+    var pollFails = 0
     var lastSpawn: Date = .distantPast
 
     // DMG-сборка несёт сервер/python/tmux внутри Resources; dev-сборка — пустая
@@ -148,11 +149,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func updateBadge() {
         guard let url = URL(string: "http://localhost:8787/api/agents") else { return }
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
             guard let data,
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let agents = obj["agents"] as? [[String: Any]] else { return }
-            let waiting = agents.filter { ($0["status"] as? String) == "waiting" }.count
+                  let agents = obj["agents"] as? [[String: Any]] else {
+                // Сервер поднимается только на неудачной загрузке страницы, а она
+                // уже загружена — умри сервер сейчас, приложение бы не заметило и
+                // висело с мёртвой доской. Этот опрос идёт каждые 3 секунды и
+                // служит заодно пульсом: пропало двоих подряд — поднимаем заново.
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.pollFails += 1
+                    if self.pollFails >= 2 {
+                        self.pollFails = 0
+                        self.spawnServerIfNeeded()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            [weak self] in self?.load()
+                        }
+                    }
+                }
+                return
+            }
+            DispatchQueue.main.async { [weak self] in self?.pollFails = 0 }
+            // сервер сам решает, что требует человека: диалог разрешения или
+            // агент, который доработал и ждёт ответа (см. attention в get_agents)
+            let waiting = agents.filter {
+                ($0["attention"] as? Bool) ?? (($0["status"] as? String) == "waiting")
+            }.count
             DispatchQueue.main.async { [weak self] in
                 NSApp.dockTile.badgeLabel = waiting > 0 ? String(waiting) : nil
                 guard let self else { return }

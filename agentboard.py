@@ -1778,6 +1778,28 @@ def get_agents():
             if tp:
                 a["preview"] = tp
 
+    # ---- «требует тебя»: то, что зажигает счётчик на иконке ----
+    # Диалог разрешения — очевидный случай. Второй, не менее важный: агент
+    # доработал и молчит в ожидании ответа. Ловим именно ПЕРЕХОД в idle, а не
+    # сам факт простоя, иначе метка висела бы вечно на всём законченном.
+    for a in live:
+        card = by_tmux.get(a["name"])
+        if card is None:
+            continue
+        was = card.get("last_status", "")
+        if a["status"] != was:
+            if was in ("working", "waiting") and a["status"] == "idle":
+                card["done_at"] = int(time.time())
+            card["last_status"] = a["status"]
+            changed = True
+        # к сессии подключён терминал — ты и так на неё смотришь
+        if a["status"] == "idle" and a.get("attached"):
+            if card.get("done_at", 0) > card.get("seen", 0):
+                card["seen"] = card["done_at"]
+                changed = True
+        a["attention"] = (a["status"] == "waiting"
+                          or card.get("done_at", 0) > card.get("seen", 0))
+
     agents = live
     for card in list(cards_list):
         if card.get("tmux") in live_names:
@@ -2231,6 +2253,37 @@ def search_available():
     return os.path.isfile(HISTORY_DB)
 
 
+HISTORY_INDEXER = os.path.expanduser("~/.claude/cc-history/index.py")
+reindex_lock = threading.Lock()
+last_reindex = 0.0
+
+
+def reindex_history(max_age=600):
+    """Освежить индекс перед поиском — его же индексатором, не своими руками.
+    Он инкрементальный (сверяет mtime) и укладывается в доли секунды. Сами в
+    чужую базу не пишем: наш доступ к ней остаётся read-only."""
+    global last_reindex
+    if not search_available() or not os.path.isfile(HISTORY_INDEXER):
+        return False
+    try:
+        fresh = max(last_reindex, os.path.getmtime(HISTORY_DB))
+    except OSError:
+        fresh = last_reindex
+    if time.time() - fresh < max_age:
+        return False
+    if not reindex_lock.acquire(blocking=False):
+        return False  # уже идёт — второй параллельный прогон только мешает
+    try:
+        subprocess.run([sys.executable, HISTORY_INDEXER],
+                       capture_output=True, timeout=120)
+        last_reindex = time.time()
+        return True
+    except Exception:
+        return False
+    finally:
+        reindex_lock.release()
+
+
 def _fts_query(q):
     """Безопасное MATCH-выражение: каждое слово в кавычках и с префиксом,
     чтобы «воронк» находил «воронки». Кавычки из запроса вычищаем — иначе
@@ -2273,6 +2326,22 @@ def search_history(query, limit=25):
         if len(out) >= int(limit):
             break
     return out
+
+
+@locked
+def mark_seen(name="", cid=""):
+    """Ты отреагировал на карточку — гасим её метку внимания. Зовётся отовсюду,
+    где действие означает «я это увидел»: открыл терминал, ответил, забрал."""
+    if not name and not cid:
+        return False
+    board = load_board()
+    now, hit = int(time.time()), False
+    for c in board["cards"]:
+        if (name and c.get("tmux") == name) or (cid and c.get("id") == cid):
+            c["seen"], hit = now, True
+    if hit:
+        save_board(board)
+    return hit
 
 
 @locked
@@ -2496,9 +2565,13 @@ class Handler(BaseHTTPRequestHandler):
         elif url.path == "/api/add":
             self.ok(add_from_history(arg("id"), arg("cwd"), arg("project"), arg("title")))
         elif url.path == "/api/resume":
+            mark_seen("", arg("id"))
             self.ok(resume_card(arg("id")))
         elif url.path == "/api/adopt":
+            mark_seen("", arg("id"))
             self.ok(adopt_external(arg("id")))
+        elif url.path == "/api/reindex":
+            self.send(200, json.dumps({"ran": reindex_history()}))
         elif url.path == "/api/search":
             self.send(200, json.dumps(search_history(arg("q"), arg("n") or 25)))
         elif url.path == "/api/new":
@@ -2508,9 +2581,13 @@ class Handler(BaseHTTPRequestHandler):
                                   arg("agent") or "claude",
                                   arg("model"), arg("effort")))
         elif url.path == "/api/send":
+            mark_seen(arg("s"))
             self.ok(send_to_agent(arg("s"), arg("text")))
+        elif url.path == "/api/seen":
+            self.ok(mark_seen(arg("s"), arg("id")))
         elif url.path == "/api/open":
             if tmux_ok("has-session", "-t", arg("s")):
+                mark_seen(arg("s"))
                 open_in_terminal(arg("s"))
                 self.ok()
             else:
