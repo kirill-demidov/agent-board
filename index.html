@@ -353,6 +353,15 @@
   .acard-actions .icon-sm svg { display: block; pointer-events: none; }
   .acard-actions .primary { background: #205c3b; border-color: #2e7a52; color: #eafff2; }
 
+  /* сессия из чужого терминала: смотреть можно, управлять нечем — вместо
+     кнопок метка, композер и крестик убраны совсем */
+  .acard-actions .ext-tag {
+    font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 6px; cursor: default;
+    color: #7d8f85; border: 1px dashed #33413a;
+  }
+  .acard.external .cmp-in, .acard.external .xbtn { display: none; }
+
   /* композер внутри карточки — разворачивается под рядом кнопок */
   .acard.open-in {
     border-color: #2e7a52; z-index: 10;
@@ -802,6 +811,8 @@
       sendTitle: 'send (⌘⏎)',
       stWorking: 'working', stNeedsYou: 'needs you', stDone: 'done', stPaused: 'paused',
       resume: 'resume', open: 'open',
+      external: 'own terminal',
+      externalTitle: 'started outside the board — watch only: it has no tmux session, so there is nothing to attach to or send into',
       replyTitle: 'reply without opening',
       modelUnknown: 'model unknown',
       agentStarting: 'agent is starting…',
@@ -861,6 +872,8 @@
       sendTitle: 'отправить (⌘⏎)',
       stWorking: 'работает', stNeedsYou: 'ждёт тебя', stDone: 'закончил', stPaused: 'на паузе',
       resume: 'продолжить', open: 'открыть',
+      external: 'свой терминал',
+      externalTitle: 'запущен мимо доски — только смотреть: tmux-сессии у него нет, аттачиться и отправлять некуда',
       replyTitle: 'написать агенту, не открывая',
       modelUnknown: 'модель не определена',
       agentStarting: 'агент запускается…',
@@ -1163,6 +1176,7 @@
     const status = (justSent && a.status === 'waiting') ? 'working' : a.status;
     el.classList.toggle('waiting', status === 'waiting');
     el.classList.toggle('parked', status === 'parked');
+    el.classList.toggle('external', !!a.external);
     if (!el.dataset.editing)
       el.querySelector('.ntext').textContent =
         a.label || a.sname || (a.status === 'parked' ? a.project : a.name);
@@ -1174,7 +1188,11 @@
       working: t('stWorking'), waiting: t('stNeedsYou'), idle: t('stDone'), parked: t('stPaused'),
     }[status] || status;
     acts.innerHTML =
-      (status === 'parked'
+      (a.external
+        // управлять нечем: сессия живёт в чужом терминале, не в нашем tmux
+        ? '<span class="ext-tag" title="' + t('externalTitle') + '">' +
+          esc(a.host || t('external')) + '</span>'
+        : status === 'parked'
         ? '<button class="primary" data-act="resume">' + t('resume') + '</button>'
         : '<button class="primary" data-act="open">' + t('open') + '</button>' +
           '<button class="icon-sm" data-act="reply" title="' + t('replyTitle') + '">' +

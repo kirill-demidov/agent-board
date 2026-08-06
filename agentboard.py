@@ -771,6 +771,41 @@ def _proc_start(pid):
     return stamp
 
 
+host_app_cache = {}  # pid -> человекочитаемое имя приложения-хозяина
+APP_RE = re.compile(r"/([^/]+)\.app/")
+APP_SHORT = {"Visual Studio Code": "VS Code"}  # длинное имя не влезает в плитку
+
+
+def _host_app(pid):
+    """Где живёт сессия: Warp, Cursor, iTerm… Ищем ближайшее .app вверх по
+    родителям — сам claude всегда просто «claude code», а вот его предок
+    (терминал или редактор) себя называет. Юзеру нужно знать, куда идти."""
+    if pid in host_app_cache:
+        return host_app_cache[pid]
+    name, cur = "", pid
+    try:
+        for _ in range(5):
+            r = subprocess.run(["ps", "-o", "ppid=,command=", "-p", str(cur)],
+                               capture_output=True, text=True, timeout=5)
+            parts = r.stdout.strip().split(None, 1)
+            if len(parts) < 2:
+                break
+            # сперва смотрим на сам процесс: у launchd-детей (Cursor.app,
+            # Warp.app) ppid уже 1, и проверка на корень съедала бы ответ
+            m = APP_RE.search(parts[1])
+            if m:
+                name = m.group(1).split(" Helper")[0]
+                name = APP_SHORT.get(name, name)
+                break
+            if parts[0] in ("0", "1"):
+                break
+            cur = parts[0]
+    except Exception:
+        pass
+    host_app_cache[pid] = name
+    return name
+
+
 def _rec_alive(rec):
     """Запись реестра описывает живой процесс, а не переиспользованный pid."""
     pid = rec.get("pid")
@@ -822,6 +857,7 @@ def external_agents(busy_pids):
             "activity": int((rec.get("updatedAt") or 0) / 1000) or int(now),
             "hook_at": hook_at if hook == "waiting" else 0,
             "external": True,
+            "host": _host_app(rec["pid"]),
         })
     return agents
 
