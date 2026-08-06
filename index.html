@@ -322,6 +322,12 @@
   }
   /* какой это CLI — видно прямо на карточке, а не только в подсказке */
   .acard-actions .meta > .agent-logo { width: 11px; height: 11px; opacity: 0.75; }
+  /* время жизни сессии — тише проекта, это фон, а не заголовок */
+  .acard-actions .meta .age {
+    font-size: 10.5px; color: #6d7d74; white-space: nowrap; flex: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .acard-actions .meta .age:empty { display: none; }
   .meta-tip {
     position: absolute; right: 0; bottom: calc(100% + 7px); z-index: 5;
     min-width: 148px; max-width: 250px;
@@ -816,6 +822,8 @@
       newAgent: 'agent',
       histTitle: 'revive an agent from history',
       tidyTitle: 'arrange the cards in a grid',
+      alive: 'alive',
+      aliveTitle: 'how long this session has been running',
       settingsTitle: 'settings',
       boardEmpty: 'The board is empty.<br>Hit <code>＋ agent</code> — pick a project, describe a task; the agent appears as a tile<br>and blinks when it finishes or asks you something.',
       all: 'all',
@@ -884,6 +892,8 @@
       newAgent: 'агент',
       histTitle: 'воскресить агента из истории',
       tidyTitle: 'разложить карточки по сетке',
+      alive: 'живёт',
+      aliveTitle: 'сколько времени работает эта сессия',
       settingsTitle: 'настройки',
       boardEmpty: 'Доска пустая.<br>Жми <code>＋ агент</code> — выбери проект, напиши задачу, агент появится плиткой<br>и замигает, когда закончит или спросит.',
       all: 'все',
@@ -1266,7 +1276,7 @@
           '<button class="icon-sm" data-act="reply" title="' + t('replyTitle') + '">' +
           '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>') +
       '<span class="meta">' + agentIcon(agent) +
-      '<span class="proj"></span><span class="st"></span>' +
+      '<span class="proj"></span><span class="age"></span><span class="st"></span>' +
       '<span class="meta-tip" aria-hidden="true">' + agentIcon(agent) +
       '<span class="meta-tip-copy"><span class="meta-tip-main"></span>' +
       '<span class="meta-tip-time"></span></span></span></span>';
@@ -1276,6 +1286,13 @@
     const activity = a.activity
       ? fmtAge(Math.max(0, Math.floor(Date.now() / 1000 - a.activity))) + ' ' + t('ago')
       : '';
+    // сколько живёт сессия: у карточки на паузе процесса нет — и возраста тоже
+    const alive = (a.created && status !== 'parked')
+      ? fmtAge(Math.max(0, Math.floor(Date.now() / 1000 - a.created)))
+      : '';
+    const age = el.querySelector('.age');
+    age.textContent = alive;
+    age.title = alive ? t('aliveTitle') : '';
     const activeStatus = status === 'working' ? statusLabel : '';
     const model = a.model || t('modelUnknown');
     const tip = [a.project, model, activeStatus, activity].filter(Boolean).join(' · ');
@@ -1283,7 +1300,8 @@
     meta.setAttribute('aria-label', tip);
     meta.querySelector('.meta-tip-main').textContent =
       [model, activeStatus].filter(Boolean).join(' · ');
-    meta.querySelector('.meta-tip-time').textContent = activity;
+    meta.querySelector('.meta-tip-time').textContent =
+      [alive ? t('alive') + ' ' + alive : '', activity].filter(Boolean).join(' · ');
     const body = el.querySelector('.acard-body');
     if (dragging !== a.name && !justSent && body.dataset.raw !== a.preview) {
       // если юзер прокрутил вверх — не дёргаем его; если был внизу — держим низ
