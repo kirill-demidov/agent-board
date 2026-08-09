@@ -662,3 +662,12 @@ html.dark .cmp-row .kbd { color: #8e8e93; }
 @media (prefers-reduced-motion: reduce) {
   html.dark .acard.waiting { animation: none; }
 }
+
+/* ручка ресайза: системная «лапка» в углу — тонкие серые риски, без глоу */
+.acard-grip {
+  background: repeating-linear-gradient(135deg, transparent 0 3px,
+                                        rgba(60, 60, 67, 0.55) 3px 4px, transparent 4px 6px);
+  border-bottom-right-radius: 12px;
+}
+.acard:hover .acard-grip { opacity: 0.5; }
+.acard-grip:hover, .acard.resizing .acard-grip { opacity: 0.85; }

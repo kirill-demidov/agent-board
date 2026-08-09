@@ -260,6 +260,16 @@
     touch-action: none;
   }
   .acard:active { cursor: grabbing; }
+  /* ручка в углу тянет размер своей плитки; двойной клик по ней — назад к пресету */
+  .acard-grip {
+    position: absolute; right: 0; bottom: 0; width: 16px; height: 16px;
+    cursor: nwse-resize; opacity: 0; transition: opacity 0.15s ease;
+    background: repeating-linear-gradient(135deg, transparent 0 3px,
+                                          var(--acc) 3px 4px, transparent 4px 6px);
+  }
+  .acard:hover .acard-grip { opacity: 0.45; }
+  .acard-grip:hover, .acard.resizing .acard-grip { opacity: 0.9; }
+  #canvas.resizing .acard { transition: none; }
   .acard.dragging { z-index: 40; box-shadow: 0 24px 50px rgba(0,0,0,0.65); }
   /* единственное состояние, которое требует действия, — пусть его видно
      боковым зрением: пульсируют и свечение, и рамка, и точка статуса */
@@ -643,7 +653,10 @@
   .ob-foot { display: flex; align-items: center; padding: 14px 18px 16px; }
   .ob-foot .m { color: #5f7a6b; font-size: 11px; }
   .ob-foot .top-btn { margin-left: auto; }
-  @media (prefers-reduced-motion: reduce) { .ob-card, #popover.center, .m-fly { animation: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .ob-card, #popover.center, .m-fly { animation: none; }
+    .acard-grip { transition: none; opacity: 0.45; }
+  }
 
   /* ---------- окно «агенты и модели»: избранное по каждому агенту ---------- */
   .mw { width: 700px; }
@@ -984,6 +997,7 @@
       loading: 'loading…', empty: 'empty',
       boardSkin: 'board skin', agents: 'agents', language: 'language',
       appearance: 'appearance', light: 'light', dark: 'dark',
+      resizeCards: 'drag to resize · double-click to reset',
       cardSize: 'card size', sizeS: 'compact', sizeM: 'normal',
       sizeL: 'large', sizeXL: 'huge',
       onlyWaitingOff: 'needs you — click to show only these',
@@ -1071,6 +1085,7 @@
       loading: 'загружаю…', empty: 'пусто',
       boardSkin: 'скин доски', agents: 'агенты', language: 'язык',
       appearance: 'оформление', light: 'светлое', dark: 'тёмное',
+      resizeCards: 'потянуть — размер · двойной клик — сброс',
       cardSize: 'размер карточек', sizeS: 'компактный', sizeM: 'обычный',
       sizeL: 'крупный', sizeXL: 'огромный',
       onlyWaitingOff: 'ждут тебя — нажми, чтобы оставить только их',
@@ -1155,6 +1170,19 @@
     if (relayout) requestAnimationFrame(tidy);
   }
 
+  // Размер отдельной плитки: w/bh в pos[name] перебивают общий пресет. Пресет
+  // остаётся дефолтом — растянутыми оказываются только те, что тянули руками.
+  const CARD_MIN = { w: 200, bh: 64 }, CARD_MAX = { w: 720, bh: 520 };
+  const clampW = v => Math.round(Math.min(CARD_MAX.w, Math.max(CARD_MIN.w, v)));
+  const clampBH = v => Math.round(Math.min(CARD_MAX.bh, Math.max(CARD_MIN.bh, v)));
+
+  function applyCardGeom(el, name) {
+    const p = pos[name] || {};
+    el.style.width = p.w ? p.w + 'px' : '';
+    const body = el.querySelector('.acard-body');
+    if (body) body.style.maxHeight = p.bh ? p.bh + 'px' : '';
+  }
+
   const pos = JSON.parse(localStorage.getItem('agentboard-pos-v2') || '{}');
   const cards = {};      // name -> element
   let lastAgents = [];
@@ -1214,6 +1242,8 @@
 
   // ---------- размещение: новый агент встаёт справа от собратьев по папке ----------
   const cardH = a => cards[a.name] ? cards[a.name].offsetHeight : CARD_H;
+  const cardW = a => cards[a.name] ? cards[a.name].offsetWidth
+                                   : ((pos[a.name] || {}).w || CARD_W);
 
   // «уронить» карточку в колонку x с высоты yStart: прижаться под мешающие плитки
   function dropY(x, yStart, self) {
@@ -1276,16 +1306,20 @@
       (TIDY_RANK[a.status] ?? 9) - (TIDY_RANK[b.status] ?? 9) ||
       (b.activity || 0) - (a.activity || 0) ||
       a.name.localeCompare(b.name));
+    // колонку меряем по самой широкой плитке: растянутая руками иначе легла бы
+    // на соседнюю колонку
+    const colW = Math.max(CARD_W, ...ordered.map(cardW));
     const cols = Math.max(1, Math.floor(
-      (window.innerWidth - X0 * 2 + GAP) / (CARD_W + GAP)));
+      (window.innerWidth - X0 * 2 + GAP) / (colW + GAP)));
     const bottom = new Array(cols).fill(Y0);
     canvas.classList.add('tidying');
     for (const a of ordered) {
       // самая короткая колонка: высоты карточек разные, иначе строки рваные
       let c = 0;
       for (let i = 1; i < cols; i++) if (bottom[i] < bottom[c] - 1) c = i;
-      const p = { x: X0 + c * (CARD_W + GAP), y: bottom[c],
-                  t: (pos[a.name] || {}).t || Date.now() };
+      const prev = pos[a.name] || {};
+      const p = { x: X0 + c * (colW + GAP), y: bottom[c],
+                  t: prev.t || Date.now(), w: prev.w, bh: prev.bh };
       pos[a.name] = p;
       bottom[c] += cardH(a) + GAP;
       const el = cards[a.name];
@@ -1342,7 +1376,8 @@
       '<div class="cmp-in"><div class="composer">' +
       '<textarea rows="2" placeholder="' + t('messageAgent') + '"></textarea>' +
       '<div class="cmp-row"><span class="kbd">' + t('sendHint') + '</span>' +
-      '<button class="send" title="' + t('sendTitle') + '">↑</button></div></div></div>';
+      '<button class="send" title="' + t('sendTitle') + '">↑</button></div></div></div>' +
+      '<div class="acard-grip" title="' + t('resizeCards') + '"></div>';
 
     const p = pos[agent.name] || { ...defaultPos(agent), t: Date.now() };
     pos[agent.name] = p;
@@ -1350,10 +1385,52 @@
     el.style.left = p.x + 'px';
     el.style.top = p.y + 'px';
 
+    applyCardGeom(el, agent.name);
+
+    const grip = el.querySelector('.acard-grip');
+    grip.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      e.stopPropagation();               // иначе карточку начнёт таскать
+      grip.setPointerCapture(e.pointerId);
+      el.classList.add('resizing');
+      canvas.classList.add('resizing');  // на время тяги гасим переезды плиток
+      const body = el.querySelector('.acard-body');
+      const startX = e.clientX, startY = e.clientY;
+      const w0 = el.offsetWidth, bh0 = body ? body.offsetHeight : 0;
+      const move = ev => {
+        const p = pos[agent.name] || (pos[agent.name] = { ...defaultPos(agent), t: Date.now() });
+        p.w = clampW(w0 + ev.clientX - startX);
+        p.bh = clampBH(bh0 + ev.clientY - startY);
+        applyCardGeom(el, agent.name);
+        fitCanvas();
+      };
+      const up = () => {
+        el.classList.remove('resizing');
+        canvas.classList.remove('resizing');
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', up);
+        save();
+        fitCanvas();
+      };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+    });
+    grip.addEventListener('dblclick', e => {   // вернуть плитку к общему размеру
+      e.stopPropagation();
+      const p = pos[agent.name];
+      if (!p) return;
+      delete p.w;
+      delete p.bh;
+      applyCardGeom(el, agent.name);
+      save();
+      fitCanvas();
+    });
+
     el.addEventListener('pointerdown', e => {
       // тело скроллится, текст названия — для dblclick; остальное таскает
       if (el.classList.contains('focus')) return;   // в центре её не двигают
       if (e.target.tagName === 'BUTTON' || e.target.classList.contains('ntext')
+          || e.target.classList.contains('acard-grip')
           || e.target.closest('.acard-body') || e.target.closest('.cmp-in')) return;
       e.preventDefault();
       dragging = agent.name;

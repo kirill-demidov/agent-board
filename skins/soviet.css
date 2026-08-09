@@ -516,3 +516,12 @@ body.only-waiting::after {
   background: conic-gradient(#ffb524, #5be070, #ffb524);
   border: 1px solid #00000070;
 }
+
+/* ручка ресайза: насечка на латунной обойме — вдавленная, без свечения */
+.acard-grip {
+  background: repeating-linear-gradient(135deg, transparent 0 3px,
+                                        #8a7a44 3px 4px, transparent 4px 6px);
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5));
+}
+.acard:hover .acard-grip { opacity: 0.6; }
+.acard-grip:hover, .acard.resizing .acard-grip { opacity: 1; }
