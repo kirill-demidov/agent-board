@@ -1791,10 +1791,15 @@ def _get_agents():
                 if ro:
                     card["rollout"] = ro
                     changed = True
-            # codex умеет `codex resume <uuid>` — даём карточке id разговора,
-            # на нём держатся имя, «недавно закрытые» и возобновление
-            if a["agent"] == "codex" and ro:
-                cid = codex_id(ro)
+            # id разговора: на нём держатся имя, «недавно закрытые» и
+            # возобновление. Возобновляться умеют все трое, у каждого свой
+            # ключ — у codex uuid из имени rollout-файла, у cursor имя каталога
+            # чата, у opencode id сессии и есть сам rollout
+            if ro:
+                cid = (codex_id(ro) if a["agent"] == "codex"
+                       else os.path.basename(os.path.dirname(ro))
+                       if a["agent"] == "cursor"
+                       else ro if a["agent"] == "opencode" else "")
                 if cid and cid != card.get("id"):
                     card["id"] = cid
                     changed = True
@@ -1909,7 +1914,7 @@ def _get_agents():
             session_path = find_session_file(card["cwd"], card["id"])
             activity = log_activity(session_path, ("user", "assistant"))
             raw_model = card.get("model") or log_model(session_path, "claude")
-        else:  # у не-клодов разговор живёт в своём логе (id есть только у codex)
+        else:  # у не-клодов разговор живёт в своём логе, id взят из него
             ro = card.get("rollout", "")
             activity = log_stamp(agent, ro) if ro else 0
             raw_model = card.get("model") or (log_model_of(agent, ro) if ro else "")
@@ -2422,8 +2427,14 @@ def resume_card(cid):
         open_in_terminal(card["tmux"])
         return True
     name = free_name(card["project"])
-    if card.get("agent") == "codex":
+    # у каждого CLI свой флаг возобновления; id уже лежит в карточке
+    agent = card.get("agent", "claude")
+    if agent == "codex":
         cmd = f"{CODEX} resume {shlex.quote(cid)}"
+    elif agent == "cursor":
+        cmd = f"{CURSOR} --resume {shlex.quote(cid)}"
+    elif agent == "opencode":
+        cmd = f"{OPENCODE} -s {shlex.quote(cid)}"
     else:
         cmd = f"{CLAUDE} --resume {shlex.quote(cid)}"
     tmux("new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", card["cwd"],
