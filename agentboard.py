@@ -2155,6 +2155,29 @@ def fs_list(root, rel=""):
             "dirs": sorted(dirs, key=key), "files": sorted(files, key=key)}
 
 
+FS_READ_MAX = 512 * 1024  # больше в окне читать всё равно невозможно
+
+
+def fs_read(root, rel):
+    """Текст файла для просмотра. Бинарники не показываем — толку ноль."""
+    root, p = fs_resolve(root, rel)
+    if not root:
+        return {"error": p}
+    if not os.path.isfile(p):
+        return {"error": "not a file"}
+    try:
+        size = os.path.getsize(p)
+        with open(p, "rb") as f:
+            raw = f.read(FS_READ_MAX)
+    except OSError as e:
+        return {"error": str(e)}
+    if b"\0" in raw[:8192]:
+        return {"error": "binary", "size": size}
+    return {"name": os.path.basename(p), "size": size,
+            "truncated": size > FS_READ_MAX,
+            "text": raw.decode("utf-8", "replace")}
+
+
 def fs_open(root, rel):
     """Открыть файл в том, что назначено системой. Путь — только внутри корня."""
     root, p = fs_resolve(root, rel)
@@ -2908,6 +2931,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, json.dumps(new_shell(arg("cwd"), arg("app"))))
         elif url.path == "/api/fs":
             self.send(200, json.dumps(fs_list(arg("root"), arg("rel"))))
+        elif url.path == "/api/fs_read":
+            self.send(200, json.dumps(fs_read(arg("root"), arg("rel"))))
         elif url.path == "/api/fs_open":
             self.ok(fs_open(arg("root"), arg("rel")))
         elif url.path == "/api/agents":

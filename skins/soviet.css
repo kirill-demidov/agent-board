@@ -540,3 +540,26 @@ body.only-waiting::after {
 #term-plus, #term-close { color: #5b4f36; }
 #term-plus:hover, #term-close:hover { color: #7a3b28; }
 #term-grip:hover, #term.sizing #term-grip { background: #8a7a44; opacity: 0.8; }
+
+/* ---------- боковая панель и просмотр файла: картотека на эмали ---------- */
+#side {
+  background: #e7dcc0; border-right: 2px solid #6b5d3a;
+  box-shadow: inset -1px 0 0 #fbf4e2;
+}
+#side-head {
+  color: #5b4f36; border-bottom: 1px solid #b3a375;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+#side-root:hover { color: #7a3b28; }
+.fs-row { color: #3b3222; }
+.fs-row:hover { background: #d8c9a4; color: #7a3b28; }
+.fs-row.dir { color: #3f5f77; }
+#side-hint { color: #6f6450; }
+#side-grip:hover, #side.sizing #side-grip { background: #8a7a44; opacity: 0.8; }
+#fv-box { background: #efe6d0; border: 2px solid #6b5d3a; border-radius: 4px; }
+#fv-head {
+  color: #3b3222; border-bottom: 1px solid #b3a375;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+#fv-body { background: #fbf4e2; color: #3b3222; }
+#fv-foot { border-top: 1px solid #b3a375; }

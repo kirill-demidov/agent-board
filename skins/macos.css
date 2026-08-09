@@ -690,3 +690,26 @@ html.dark .cmp-row .kbd { color: #8e8e93; }
 html.dark #term { background: rgba(28, 28, 30, 0.94); border-top-color: rgba(255,255,255,0.12); }
 html.dark .term-tab { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); color: #98989d; }
 html.dark .term-tab.active { background: #1c1c1e; color: #0a84ff; }
+
+/* ---------- боковая панель и просмотр файла: стекло, системная типографика ---------- */
+#side {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-right: 1px solid rgba(0, 0, 0, 0.12);
+  font-family: -apple-system, "SF Pro Text", system-ui, sans-serif; font-size: 12px;
+}
+#side-head { color: #6e6e73; border-bottom-color: rgba(0, 0, 0, 0.08); }
+#side-root:hover { color: #0a84ff; }
+.fs-row { color: #1d1d1f; }
+.fs-row:hover { background: rgba(10, 132, 255, 0.1); color: #0a84ff; }
+.fs-row.dir { color: #0a5ec4; }
+#side-hint { color: #8e8e93; }
+#side-grip:hover, #side.sizing #side-grip { background: #0a84ff; }
+#fv-box { background: #fff; border-color: rgba(0,0,0,0.12); border-radius: 12px; }
+#fv-head { color: #1d1d1f; border-bottom-color: rgba(0,0,0,0.08); }
+#fv-body { background: #fff; color: #1d1d1f; }
+#fv-foot { border-top-color: rgba(0,0,0,0.08); }
+html.dark #side { background: rgba(28,28,30,0.94); border-right-color: rgba(255,255,255,0.12); }
+html.dark .fs-row { color: #e5e5ea; }
+html.dark #fv-box { background: #1c1c1e; border-color: rgba(255,255,255,0.12); }
+html.dark #fv-head, html.dark #fv-body { background: #1c1c1e; color: #e5e5ea; }
