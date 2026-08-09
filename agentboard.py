@@ -1668,8 +1668,30 @@ def get_live():
     return agents
 
 
-@locked
+last_agents = None  # последний снимок: им отвечаем, пока идёт соседний скан
+
+
 def get_agents():
+    """Снимок для доски. В очередь за BOARD_LOCK не встаём — см. ниже."""
+    global last_agents
+    # доска опрашивает нас каждые 2 с, не дожидаясь предыдущего ответа, а скан
+    # держит BOARD_LOCK всё время обхода сессий. Стоит одному проходу не уложиться
+    # в 2 с — ожидающие начинают копиться, отбирают GIL у считающего, проход
+    # тормозит ещё сильнее, и очередь растёт быстрее, чем разгребается. Из такой
+    # лавины (наблюдали 571 поток) сервер сам уже не выходит. Поэтому: занят —
+    # мгновенно отдаём прошлый снимок, он отстаёт на секунду и это незаметно.
+    if not BOARD_LOCK.acquire(blocking=False):
+        if last_agents is not None:
+            return last_agents
+        BOARD_LOCK.acquire()  # первый запрос после старта: отдавать нечего, ждём
+    try:
+        last_agents = _get_agents()
+        return last_agents
+    finally:
+        BOARD_LOCK.release()
+
+
+def _get_agents():
     """Живые из tmux + карточки на паузе. Всё живое само попадает в board.json."""
     live = get_live()
     board = load_board()
