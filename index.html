@@ -1052,6 +1052,7 @@
       openWhere: 'open session in', openPanel: 'bottom panel',
       openExternal: 'external terminal (⌥ click)', termClosed: 'disconnected',
       termNoApp: 'not installed — opened a shell instead',
+      whereOpen: 'open in', sameDir: 'same folder as this tab', homeDir: 'home folder',
       cardSize: 'card size', sizeS: 'compact', sizeM: 'normal',
       sizeL: 'large', sizeXL: 'huge',
       onlyWaitingOff: 'needs you — click to show only these',
@@ -1143,6 +1144,7 @@
       openWhere: 'сессию открывать', openPanel: 'в панели снизу',
       openExternal: 'во внешнем терминале (⌥ клик)', termClosed: 'отключено',
       termNoApp: 'не установлен — открыта оболочка',
+      whereOpen: 'открыть в', sameDir: 'каталог текущей вкладки', homeDir: 'домашний каталог',
       cardSize: 'размер карточек', sizeS: 'компактный', sizeM: 'обычный',
       sizeL: 'крупный', sizeXL: 'огромный',
       onlyWaitingOff: 'ждут тебя — нажми, чтобы оставить только их',
@@ -1482,7 +1484,7 @@
     ws.onopen = () => termFit(name);
   }
 
-  function openTerm(name, note) {
+  function openTerm(name, note, cwd) {
     termEl.classList.add('show');
     if (terms[name]) { selectTerm(name); return; }
 
@@ -1529,7 +1531,7 @@
       return true;
     });
 
-    terms[name] = { term, fit, view, tab, ws: null };
+    terms[name] = { term, fit, view, tab, ws: null, cwd: cwd || '' };
     // ввод — бинарным кадром: управляющие сообщения ходят текстовыми
     term.onData(d => {
       const s = terms[name];
@@ -1557,17 +1559,48 @@
 
   // «+» — обычная оболочка, «▤» — файловый менеджер. Что именно запускать,
   // решает сервер по своему списку: команду отсюда не передаём.
-  termPlusBtn.addEventListener('click', () => newShellTerm());
-  document.getElementById('term-files').addEventListener('click', () => newShellTerm('mc'));
+  termPlusBtn.addEventListener('click', e => termDirMenu(e, ''));
+  document.getElementById('term-files').addEventListener('click', e => termDirMenu(e, 'mc'));
 
-  async function newShellTerm(app) {
-    const r = await api('term_new' + (app ? '?app=' + encodeURIComponent(app) : ''));
+  // Где открывать: домашний каталог редко бывает нужным. Предлагаем проекты
+  // доски, каталог активной вкладки и любую папку через нативный диалог.
+  function termDirMenu(ev, app) {
+    const r = ev.currentTarget.getBoundingClientRect();
+    const x = r.left, y = r.bottom + 4;
+    const here = terms[termActive] && terms[termActive].cwd;
+    const rows = projects.map((p, i) =>
+      '<button class="po-item po-sess po-flex" data-i="' + i + '">' + projIcon(p) +
+      '<span class="t">' + esc(p.project) + '</span></button>').join('');
+    showPopover(x, y,
+      '<div class="po-head">' + t('whereOpen') + '</div>' +
+      (here ? '<button class="po-item" data-here="1">' + esc(t('sameDir')) + '</button>' : '') +
+      '<div class="po-list">' + rows + '</div>' +
+      '<button class="po-item" data-home="1">' + t('homeDir') + '</button>' +
+      '<button class="po-item" data-other="1">' + t('otherFolder') + '</button>');
+    const go = cwd => { hidePopover(); newShellTerm(app, cwd); };
+    popover.querySelectorAll('.po-item[data-i]').forEach(b => {
+      b.onclick = () => go(projects[+b.dataset.i].cwd);
+    });
+    const hereBtn = popover.querySelector('[data-here]');
+    if (hereBtn) hereBtn.onclick = () => go(here);
+    popover.querySelector('[data-home]').onclick = () => go('');
+    popover.querySelector('[data-other]').onclick = async () => {
+      showPopover(x, y, '<div class="po-empty">' + t('pickFolderHint') + '</div>');
+      const d = await api('pickdir?lang=' + LANG);
+      if (!d || d.cancelled) { hidePopover(); return; }
+      go(d.cwd);
+    };
+  }
+
+  async function newShellTerm(app, cwd) {
+    const r = await api('term_new?app=' + encodeURIComponent(app || '') +
+                        '&cwd=' + encodeURIComponent(cwd || ''));
     if (!r || !r.session) return;
     termEl.classList.add('show');
     // попросили менеджер, а его нет — открылась оболочка, честно предупреждаем
     openTerm(r.session, r.asked && !r.app
       ? '\x1b[33m' + r.asked + ': ' + t('termNoApp') + '\x1b[0m'
-      : '');
+      : '', r.cwd);
   }
 
   // Терминал одевается по скину доски: на светлом macOS и бежевом СССР
@@ -1975,7 +2008,7 @@
     const act = btn.dataset.act;
     // ⌥ — открыть наперекор настройке: панель есть, но нужен внешний терминал
     if (act === 'open') {
-      if (termWhere === 'panel' && !e.altKey) openTerm(a.name);
+      if (termWhere === 'panel' && !e.altKey) openTerm(a.name, '', a.path);
       else api('open?s=' + encodeURIComponent(a.name));
     }
     if (act === 'reply') {

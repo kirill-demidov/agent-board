@@ -2099,7 +2099,8 @@ def new_shell(cwd="", app=""):
          f"{LOCALE_EXPORT}; export PATH={shlex.quote(AGENT_PATH)}; {run}")
     tmux("set-option", "-t", name, "mouse", "on")
     tmux("set-option", "-t", name, "mode-style", "bg=colour236,fg=colour245")
-    return {"session": name, "app": app if binary else "", "asked": app}
+    return {"session": name, "app": app if binary else "", "asked": app,
+            "cwd": cwd}
 
 
 # ---------- действия ----------
