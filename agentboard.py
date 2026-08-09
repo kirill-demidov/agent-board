@@ -2076,6 +2076,25 @@ def term_attach(sock, rfile, name, cols, rows):
             pass
 
 
+def new_shell(cwd=""):
+    """Обычная оболочка вкладкой в панели: не агент, карточку не заводим.
+
+    Размер тот же 220×50, что и у агентов: панель всё равно ресайзит сессию под
+    себя, а рождённая мелкой сессия потом мажет при первом же изменении.
+    """
+    cwd = cwd if cwd and os.path.isdir(cwd) else os.path.expanduser("~")
+    base = "sh-" + str(int(time.time()) % 100000)
+    name, i = base, 0
+    while tmux_ok("has-session", "-t", name):
+        i += 1
+        name = base + "-" + str(i)
+    tmux("new-session", "-d", "-s", name, "-x", "220", "-y", "50", "-c", cwd,
+         f"{LOCALE_EXPORT}; export PATH={shlex.quote(AGENT_PATH)}; exec $SHELL -l")
+    tmux("set-option", "-t", name, "mouse", "on")
+    tmux("set-option", "-t", name, "mode-style", "bg=colour236,fg=colour245")
+    return name
+
+
 # ---------- действия ----------
 
 # ---------- каталоги моделей: сами CLI + имена из models.dev ----------
@@ -2816,6 +2835,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(200, f.read(), "text/html; charset=utf-8")
         elif url.path == "/ws/term":
             self.serve_term(arg("session"), arg("cols"), arg("rows"))
+        elif url.path == "/api/term_new":
+            self.send(200, json.dumps({"session": new_shell(arg("cwd"))}))
         elif url.path == "/api/agents":
             self.send(200, json.dumps(get_agents()))
         elif url.path == "/api/history":

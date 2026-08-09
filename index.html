@@ -686,8 +686,9 @@
   .term-tab.active { color: var(--acc); border-color: var(--acc); }
   .term-tab .x { opacity: 0.5; }
   .term-tab .x:hover { opacity: 1; }
-  #term-close { margin-left: auto; cursor: pointer; color: #8fa89a; padding: 2px 6px; }
-  #term-close:hover { color: var(--acc); }
+  #term-plus, #term-close { cursor: pointer; color: #8fa89a; padding: 2px 8px; }
+  #term-plus:hover, #term-close:hover { color: var(--acc); }
+  #term-close { margin-left: auto; }
   #term-body { flex: 1 1 auto; min-height: 0; position: relative; }
   .term-view { position: absolute; inset: 0; display: none; }
   .term-view.active { display: block; }
@@ -925,6 +926,9 @@
     <button class="top-btn ghost icon-btn" id="topTidy" title="arrange the cards in a grid">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/></svg>
     </button>
+    <button class="top-btn ghost icon-btn" id="topTerm" title="terminal panel (⌃`)">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><polyline points="7 9 10 12 7 15"/><line x1="12" y1="15" x2="17" y2="15"/></svg>
+    </button>
     <button class="top-btn ghost icon-btn" id="topHist" title="revive an agent from history">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.3"/><polyline points="3 3 3 7.5 7.5 7.5"/><polyline points="12 7 12 12 15.5 14"/></svg>
     </button>
@@ -963,7 +967,8 @@
 
   <div id="term">
     <div id="term-grip"></div>
-    <div id="term-bar"><span id="term-close" title="close panel">▾</span></div>
+    <div id="term-bar"><span id="term-plus" title="new shell session">+</span>
+      <span id="term-close" title="hide panel (⌃`)">▾</span></div>
     <div id="term-body"></div>
   </div>
 
@@ -1418,6 +1423,7 @@
   const termBar = document.getElementById('term-bar');
   const termBody = document.getElementById('term-body');
   const termCloseBtn = document.getElementById('term-close');
+  const termPlusBtn = document.getElementById('term-plus');
   const terms = {};          // сессия -> {term, fit, ws, view, tab}
   let termActive = null;
 
@@ -1482,8 +1488,13 @@
     const term = new Terminal({
       fontSize: 12, scrollback: 5000, allowProposedApi: true,
       fontFamily: '"SF Mono", ui-monospace, Menlo, Monaco, monospace',
-      theme: { background: '#0b100d', foreground: '#c9d8cf',
-               cursor: '#5bd98a', selectionBackground: 'rgba(91,217,138,0.25)' },
+      // клод сам просит мышь, codex — нет и листается copy-mode'ом tmux; и то и
+      // другое приезжает сюда как обычный ввод. Но пока мышь забрана сессией,
+      // выделить текст в панели нечем — ⌥ отдаёт перетаскивание нам обратно
+      macOptionClickForcesSelection: true,
+      macOptionIsMeta: false,      // ⌥ нужен для выделения, а не как Meta
+      rightClickSelectsWord: true, // правый клик по слову — как в терминалах macOS
+      theme: termTheme(),
     });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
@@ -1496,7 +1507,22 @@
     tab.addEventListener('click', e => {
       if (e.target.classList.contains('x')) closeTerm(name); else selectTerm(name);
     });
-    termBar.insertBefore(tab, termCloseBtn);
+    termBar.insertBefore(tab, termPlusBtn);
+
+    // ⌘C/⌘V сами не работают: их некому обработать, а в PTY они не значат
+    // ничего. Ctrl+C не трогаем — он и должен уходить агенту как прерывание.
+    term.attachCustomKeyEventHandler(ev => {
+      if (!ev.metaKey || ev.type !== 'keydown') return true;
+      if (ev.key === 'c' && term.hasSelection()) {
+        navigator.clipboard.writeText(term.getSelection());
+        return false;
+      }
+      if (ev.key === 'v') {
+        navigator.clipboard.readText().then(txt => txt && term.paste(txt));
+        return false;
+      }
+      return true;
+    });
 
     terms[name] = { term, fit, view, tab, ws: null };
     // ввод — бинарным кадром: управляющие сообщения ходят текстовыми
@@ -1508,7 +1534,57 @@
     connectTerm(name);
   }
 
-  termCloseBtn.addEventListener('click', () => termEl.classList.remove('show'));
+  // Панель прячется, вкладки живут: сессии не рвём, чтобы не терять прокрутку.
+  function toggleTerm(force) {
+    const show = force === undefined ? !termEl.classList.contains('show') : force;
+    termEl.classList.toggle('show', show);
+    if (show) {
+      if (!Object.keys(terms).length) newShellTerm();
+      else if (termActive) selectTerm(termActive);
+    }
+  }
+  termCloseBtn.addEventListener('click', () => toggleTerm(false));
+  document.getElementById('topTerm').addEventListener('click', () => toggleTerm());
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.key === '`') { e.preventDefault(); toggleTerm(); }
+  });
+
+  // «+» — обычная оболочка в рабочем каталоге доски, не агент
+  termPlusBtn.addEventListener('click', () => newShellTerm());
+  async function newShellTerm() {
+    const r = await api('term_new');
+    if (r && r.session) { termEl.classList.add('show'); openTerm(r.session); }
+  }
+
+  // Терминал одевается по скину доски: на светлом macOS и бежевом СССР
+  // фосфорная зелень по чёрному выглядит чужеродно
+  const TERM_THEMES = {
+    '': { background: '#0b100d', foreground: '#c9d8cf', cursor: '#5bd98a',
+          selectionBackground: 'rgba(91,217,138,0.25)' },
+    'macos.css': { background: '#ffffff', foreground: '#1d1d1f', cursor: '#0a84ff',
+                   selectionBackground: 'rgba(10,132,255,0.22)',
+                   black: '#1d1d1f', red: '#d70015', green: '#248a3d',
+                   yellow: '#b25000', blue: '#0a84ff', magenta: '#a244c4',
+                   cyan: '#00a0a8', white: '#3c3c43' },
+    'soviet.css': { background: '#efe6d0', foreground: '#3b3222', cursor: '#8a6b1f',
+                    selectionBackground: 'rgba(138,107,31,0.25)',
+                    black: '#3b3222', red: '#9e3b28', green: '#4d6b34',
+                    yellow: '#8a6b1f', blue: '#3f5f77', magenta: '#7a4a63',
+                    cyan: '#3f6f6b', white: '#6f6450' },
+  };
+  const macDark = { background: '#1c1c1e', foreground: '#e5e5ea', cursor: '#0a84ff',
+                    selectionBackground: 'rgba(10,132,255,0.3)' };
+
+  function termTheme() {
+    const skin = localStorage.getItem('agentboard-skin') || '';
+    if (skin === 'macos.css' && appearance() === 'dark') return macDark;
+    return TERM_THEMES[skin] || TERM_THEMES[''];
+  }
+
+  function retintTerms() {
+    const th = termTheme();
+    for (const s of Object.values(terms)) s.term.options.theme = th;
+  }
 
   document.getElementById('term-grip').addEventListener('pointerdown', e => {
     e.preventDefault();
@@ -2783,6 +2859,7 @@
     if (file) skinLink.href = '/skins/' + file + '?v=' + Date.now();
     else skinLink.removeAttribute('href');
     localStorage.setItem('agentboard-skin', file || '');
+    retintTerms();
   }
 
   // светлое/тёмное оформление: класс на <html>, на него отвечают скины с ночным
@@ -2797,6 +2874,7 @@
   function applyAppearance(mode) {
     localStorage.setItem('agentboard-appearance', mode);
     document.documentElement.classList.toggle('dark', mode === 'dark');
+    retintTerms();
   }
 
   function settingsMenu(x, y) {

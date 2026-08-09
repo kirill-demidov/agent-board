@@ -671,3 +671,22 @@ html.dark .cmp-row .kbd { color: #8e8e93; }
 }
 .acard:hover .acard-grip { opacity: 0.5; }
 .acard-grip:hover, .acard.resizing .acard-grip { opacity: 0.85; }
+
+/* ---------- панель терминала: стекло и системные цвета ---------- */
+#term {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.12);
+}
+.term-tab {
+  background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.1);
+  color: #6e6e73; font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
+}
+.term-tab.active { color: #0a84ff; border-color: #0a84ff; background: #fff; }
+#term-plus, #term-close { color: #6e6e73; }
+#term-plus:hover, #term-close:hover { color: #0a84ff; }
+#term-grip:hover, #term.sizing #term-grip { background: #0a84ff; }
+html.dark #term { background: rgba(28, 28, 30, 0.94); border-top-color: rgba(255,255,255,0.12); }
+html.dark .term-tab { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); color: #98989d; }
+html.dark .term-tab.active { background: #1c1c1e; color: #0a84ff; }

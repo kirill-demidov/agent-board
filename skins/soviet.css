@@ -525,3 +525,18 @@ body.only-waiting::after {
 }
 .acard:hover .acard-grip { opacity: 0.6; }
 .acard-grip:hover, .acard.resizing .acard-grip { opacity: 1; }
+
+/* ---------- панель терминала: бумажная лента в стальной обойме ---------- */
+#term {
+  background: #efe6d0;
+  border-top: 2px solid #6b5d3a;
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.35), inset 0 1px 0 #fbf4e2;
+}
+.term-tab {
+  background: #e3d7bb; border-color: #8a7a44; color: #5b4f36;
+  border-radius: 3px 3px 0 0; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.term-tab.active { background: #fbf4e2; color: #7a3b28; border-color: #7a3b28; }
+#term-plus, #term-close { color: #5b4f36; }
+#term-plus:hover, #term-close:hover { color: #7a3b28; }
+#term-grip:hover, #term.sizing #term-grip { background: #8a7a44; opacity: 0.8; }
