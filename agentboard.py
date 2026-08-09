@@ -9,11 +9,16 @@ Claude Code — вернуть можно через «+» из истории.
 
 Запуск: python3 agentboard.py → http://localhost:8787
 """
+import base64
+import fcntl
 import glob
 import hashlib
 import json
 import os
+import pty
 import re
+import struct
+import termios
 import shlex
 import shutil
 import signal
@@ -1946,6 +1951,131 @@ def _get_agents():
             "hooks": hooks_state(), "search": search_available()}
 
 
+# ---------- встроенный терминал: WebSocket + PTY поверх `tmux attach` ----------
+# Библиотеки не берём: рукопожатие — sha1+base64, фрейминг — десяток строк.
+# Канал даёт исполнение команд, поэтому пускаем его через ту же проверку
+# origin, что и остальные ручки (см. Handler.cross_origin).
+WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def ws_accept(key):
+    return base64.b64encode(
+        hashlib.sha1((key + WS_MAGIC).encode()).digest()).decode()
+
+
+def ws_frame(payload, opcode=0x2):
+    """Кадр сервер→клиент: без маски, длина в одном из трёх форматов."""
+    n = len(payload)
+    if n < 126:
+        head = struct.pack("!BB", 0x80 | opcode, n)
+    elif n < 65536:
+        head = struct.pack("!BBH", 0x80 | opcode, 126, n)
+    else:
+        head = struct.pack("!BBQ", 0x80 | opcode, 127, n)
+    return head + payload
+
+
+def ws_read(rfile):
+    """Кадр клиент→сервер: маска обязательна. None — поток кончился.
+
+    Фрагментацию (FIN=0) не собираем: браузер шлёт ввод терминала мелкими
+    целыми кадрами, а огромных сообщений тут не бывает.
+    """
+    hdr = rfile.read(2)
+    if len(hdr) < 2:
+        return None
+    b1, b2 = hdr[0], hdr[1]
+    opcode, masked, n = b1 & 0x0F, b2 & 0x80, b2 & 0x7F
+    if n == 126:
+        n = struct.unpack("!H", rfile.read(2))[0]
+    elif n == 127:
+        n = struct.unpack("!Q", rfile.read(8))[0]
+    mask = rfile.read(4) if masked else b""
+    data = rfile.read(n) or b""
+    if masked:
+        data = bytes(c ^ mask[i % 4] for i, c in enumerate(data))
+    return opcode, data
+
+
+def pty_resize(fd, cols, rows):
+    try:
+        fcntl.ioctl(fd, termios.TIOCSWINSZ,
+                    struct.pack("HHHH", rows, cols, 0, 0))
+    except OSError:
+        pass
+
+
+def term_attach(sock, rfile, name, cols, rows):
+    """Гоняем байты между сокетом и `tmux attach -t name` в отдельном PTY.
+
+    Свой PTY на вкладку, а не общий с доской: tmux размер берёт у последнего
+    подключённого клиента, и общий терминал переклеил бы всем сессиям геометрию.
+    """
+    pid, fd = pty.fork()
+    if pid == 0:  # ребёнок: он и есть терминал
+        os.environ["TERM"] = "xterm-256color"
+        os.environ["PATH"] = AGENT_PATH
+        try:
+            os.execv(TMUX_CMD[0], [*TMUX_CMD, "attach", "-t", name])
+        finally:
+            os._exit(1)
+    pty_resize(fd, cols, rows)
+
+    def pump():  # PTY → сокет
+        try:
+            while True:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                sock.sendall(ws_frame(chunk))
+        except (OSError, ValueError):
+            pass
+        finally:
+            try:
+                sock.sendall(ws_frame(b"", 0x8))  # close
+            except OSError:
+                pass
+
+    t = threading.Thread(target=pump, daemon=True)
+    t.start()
+    try:
+        while True:
+            got = ws_read(rfile)
+            if got is None:
+                break
+            opcode, data = got
+            if opcode == 0x8:  # клиент закрыл вкладку
+                break
+            if opcode == 0x9:  # ping → pong
+                sock.sendall(ws_frame(data, 0xA))
+                continue
+            if opcode == 0x1:
+                # текстовый кадр — управление; ввод идёт бинарными, поэтому
+                # «{» с клавиатуры не притворится командой
+                try:
+                    msg = json.loads(data)
+                except ValueError:
+                    continue
+                if msg.get("t") == "size":
+                    pty_resize(fd, int(msg.get("cols", cols)),
+                               int(msg.get("rows", rows)))
+                continue
+            os.write(fd, data)
+    except OSError:
+        pass
+    finally:
+        # честно гасим: осиротевший attach держал бы PTY и поток вечно
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.kill(pid, signal.SIGHUP)
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
+
+
 # ---------- действия ----------
 
 # ---------- каталоги моделей: сами CLI + имена из models.dev ----------
@@ -2621,6 +2751,27 @@ class Handler(BaseHTTPRequestHandler):
     def ok(self, good=True):
         self.send(200 if good else 404, json.dumps({"ok": bool(good)}))
 
+    def serve_term(self, name, cols, rows):
+        """Апгрейд до WebSocket и привязка вкладки к сессии tmux."""
+        key = self.headers.get("Sec-WebSocket-Key")
+        if not key or self.headers.get("Upgrade", "").lower() != "websocket":
+            self.send(400, '{"error": "not a websocket handshake"}')
+            return
+        if not name or not tmux_ok("has-session", "-t", name):
+            self.send(404, '{"error": "no such session"}')
+            return
+        self.wfile.write(
+            b"HTTP/1.1 101 Switching Protocols\r\n"
+            b"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+            b"Sec-WebSocket-Accept: " + ws_accept(key).encode() + b"\r\n\r\n")
+        self.wfile.flush()
+        self.close_connection = True  # дальше кадры, HTTP на сокете кончился
+        try:
+            term_attach(self.connection, self.rfile, name,
+                        int(cols or 120), int(rows or 30))
+        except (OSError, ValueError):
+            pass
+
     def cross_origin(self):
         """Запрос пришёл со стороннего сайта — отказ.
 
@@ -2663,6 +2814,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/":
             with open(os.path.join(HERE, "index.html"), "rb") as f:
                 self.send(200, f.read(), "text/html; charset=utf-8")
+        elif url.path == "/ws/term":
+            self.serve_term(arg("session"), arg("cols"), arg("rows"))
         elif url.path == "/api/agents":
             self.send(200, json.dumps(get_agents()))
         elif url.path == "/api/history":
@@ -2751,11 +2904,15 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send(404, '{"error": "no skin"}')
         elif url.path.startswith("/assets/"):
+            # vendor/ — только он вложенный; basename отрезает попытки выйти вверх
+            sub = "vendor" if url.path.startswith("/assets/vendor/") else ""
             fn = os.path.basename(url.path)
-            p = os.path.join(HERE, "assets", fn)
-            if fn.endswith(".svg") and os.path.isfile(p):
+            p = os.path.join(HERE, "assets", sub, fn)
+            mime = {".svg": "image/svg+xml", ".css": "text/css",
+                    ".js": "text/javascript"}.get(os.path.splitext(fn)[1])
+            if mime and os.path.isfile(p):
                 with open(p, "rb") as f:
-                    self.send(200, f.read(), "image/svg+xml")
+                    self.send(200, f.read(), mime + "; charset=utf-8")
             else:
                 self.send(404, '{"error": "no asset"}')
         elif url.path == "/api/jslog":

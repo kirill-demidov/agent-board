@@ -656,7 +656,41 @@
   @media (prefers-reduced-motion: reduce) {
     .ob-card, #popover.center, .m-fly { animation: none; }
     .acard-grip { transition: none; opacity: 0.45; }
+    #term { transition: none; }
   }
+
+  /* ---------- панель терминала: снизу на всю ширину, как в редакторах ---------- */
+  #term {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    height: var(--term-h, 320px);
+    display: none; flex-direction: column;
+    background: #0b100d; border-top: 1px solid #2c3a32;
+    box-shadow: 0 -12px 32px rgba(0,0,0,0.5);
+  }
+  #term.show { display: flex; }
+  #term-grip {
+    height: 6px; cursor: ns-resize; flex: 0 0 auto;
+    background: transparent;
+  }
+  #term-grip:hover, #term.sizing #term-grip { background: var(--acc); opacity: 0.5; }
+  #term-bar {
+    display: flex; align-items: center; gap: 4px; padding: 0 6px 4px;
+    flex: 0 0 auto; overflow-x: auto;
+  }
+  .term-tab {
+    display: flex; align-items: center; gap: 6px; padding: 3px 8px;
+    border: 1px solid #2c3a32; border-radius: 6px 6px 0 0; cursor: pointer;
+    font: 11px/1.6 "SF Mono", ui-monospace, Menlo, monospace; color: #8fa89a;
+    background: rgba(20,30,24,0.8); white-space: nowrap;
+  }
+  .term-tab.active { color: var(--acc); border-color: var(--acc); }
+  .term-tab .x { opacity: 0.5; }
+  .term-tab .x:hover { opacity: 1; }
+  #term-close { margin-left: auto; cursor: pointer; color: #8fa89a; padding: 2px 6px; }
+  #term-close:hover { color: var(--acc); }
+  #term-body { flex: 1 1 auto; min-height: 0; position: relative; }
+  .term-view { position: absolute; inset: 0; display: none; }
+  .term-view.active { display: block; }
 
   /* ---------- окно «агенты и модели»: избранное по каждому агенту ---------- */
   .mw { width: 700px; }
@@ -927,6 +961,15 @@
     </div>
   </div>
 
+  <div id="term">
+    <div id="term-grip"></div>
+    <div id="term-bar"><span id="term-close" title="close panel">▾</span></div>
+    <div id="term-body"></div>
+  </div>
+
+<link rel="stylesheet" href="/assets/vendor/xterm.css">
+<script src="/assets/vendor/xterm.js"></script>
+<script src="/assets/vendor/xterm-addon-fit.js"></script>
 <script>
   // ---------- строки интерфейса: два языка, переключаются в настройках ----------
   const STR = {
@@ -998,6 +1041,8 @@
       boardSkin: 'board skin', agents: 'agents', language: 'language',
       appearance: 'appearance', light: 'light', dark: 'dark',
       resizeCards: 'drag to resize · double-click to reset',
+      openWhere: 'open session in', openPanel: 'bottom panel',
+      openExternal: 'external terminal (⌥ click)', termClosed: 'disconnected',
       cardSize: 'card size', sizeS: 'compact', sizeM: 'normal',
       sizeL: 'large', sizeXL: 'huge',
       onlyWaitingOff: 'needs you — click to show only these',
@@ -1086,6 +1131,8 @@
       boardSkin: 'скин доски', agents: 'агенты', language: 'язык',
       appearance: 'оформление', light: 'светлое', dark: 'тёмное',
       resizeCards: 'потянуть — размер · двойной клик — сброс',
+      openWhere: 'сессию открывать', openPanel: 'в панели снизу',
+      openExternal: 'во внешнем терминале (⌥ клик)', termClosed: 'отключено',
       cardSize: 'размер карточек', sizeS: 'компактный', sizeM: 'обычный',
       sizeL: 'крупный', sizeXL: 'огромный',
       onlyWaitingOff: 'ждут тебя — нажми, чтобы оставить только их',
@@ -1360,6 +1407,134 @@
   dim.addEventListener('pointerdown', unfocusAll);
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') unfocusAll();
+  });
+
+  // ---------- панель терминала ----------
+  // Вкладка = сессия tmux + свой WebSocket + свой PTY на сервере. Новый размер
+  // шлём по отпусканию мыши, а не на каждый пиксель: tmux на каждый ресайз
+  // перерисовывает TUI агента, и в реальном времени это мельтешит.
+  let termWhere = localStorage.getItem('agentboard-term-where') || 'panel';
+  const termEl = document.getElementById('term');
+  const termBar = document.getElementById('term-bar');
+  const termBody = document.getElementById('term-body');
+  const termCloseBtn = document.getElementById('term-close');
+  const terms = {};          // сессия -> {term, fit, ws, view, tab}
+  let termActive = null;
+
+  termEl.style.setProperty('--term-h',
+    (parseInt(localStorage.getItem('agentboard-term-h'), 10) || 320) + 'px');
+
+  function termFit(name) {
+    const s = terms[name];
+    if (!s || !s.view.classList.contains('active')) return;
+    try { s.fit.fit(); } catch (e) { return; }
+    if (s.ws && s.ws.readyState === 1) {
+      s.ws.send(JSON.stringify({ t: 'size', cols: s.term.cols, rows: s.term.rows }));
+    }
+  }
+
+  function selectTerm(name) {
+    termActive = name;
+    for (const [k, s] of Object.entries(terms)) {
+      s.view.classList.toggle('active', k === name);
+      s.tab.classList.toggle('active', k === name);
+    }
+    const s = terms[name];
+    if (s) { termFit(name); s.term.focus(); }
+  }
+
+  function closeTerm(name) {
+    const s = terms[name];
+    if (!s) return;
+    if (s.ws) s.ws.close();
+    s.term.dispose();
+    s.view.remove();
+    s.tab.remove();
+    delete terms[name];
+    const rest = Object.keys(terms);
+    if (rest.length) selectTerm(rest[0]);
+    else { termActive = null; termEl.classList.remove('show'); }
+  }
+
+  function connectTerm(name) {
+    const s = terms[name];
+    if (!s) return;
+    const ws = new WebSocket(location.origin.replace(/^http/, 'ws') +
+      '/ws/term?session=' + encodeURIComponent(name) +
+      '&cols=' + s.term.cols + '&rows=' + s.term.rows);
+    ws.binaryType = 'arraybuffer';
+    s.ws = ws;
+    const dec = new TextDecoder();
+    ws.onmessage = e => s.term.write(
+      typeof e.data === 'string' ? e.data : dec.decode(new Uint8Array(e.data)));
+    ws.onclose = () => { s.ws = null; s.term.write('\r\n\x1b[2m— ' + t('termClosed') + ' —\x1b[0m\r\n'); };
+    ws.onopen = () => termFit(name);
+  }
+
+  function openTerm(name) {
+    termEl.classList.add('show');
+    if (terms[name]) { selectTerm(name); return; }
+
+    const view = document.createElement('div');
+    view.className = 'term-view';
+    termBody.appendChild(view);
+
+    const term = new Terminal({
+      fontSize: 12, scrollback: 5000, allowProposedApi: true,
+      fontFamily: '"SF Mono", ui-monospace, Menlo, Monaco, monospace',
+      theme: { background: '#0b100d', foreground: '#c9d8cf',
+               cursor: '#5bd98a', selectionBackground: 'rgba(91,217,138,0.25)' },
+    });
+    const fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(view);
+
+    const tab = document.createElement('span');
+    tab.className = 'term-tab';
+    tab.innerHTML = '<span class="lbl"></span><span class="x">×</span>';
+    tab.querySelector('.lbl').textContent = name;
+    tab.addEventListener('click', e => {
+      if (e.target.classList.contains('x')) closeTerm(name); else selectTerm(name);
+    });
+    termBar.insertBefore(tab, termCloseBtn);
+
+    terms[name] = { term, fit, view, tab, ws: null };
+    // ввод — бинарным кадром: управляющие сообщения ходят текстовыми
+    term.onData(d => {
+      const s = terms[name];
+      if (s && s.ws && s.ws.readyState === 1) s.ws.send(new TextEncoder().encode(d));
+    });
+    selectTerm(name);
+    connectTerm(name);
+  }
+
+  termCloseBtn.addEventListener('click', () => termEl.classList.remove('show'));
+
+  document.getElementById('term-grip').addEventListener('pointerdown', e => {
+    e.preventDefault();
+    const grip = e.currentTarget;
+    grip.setPointerCapture(e.pointerId);
+    termEl.classList.add('sizing');
+    const startY = e.clientY, h0 = termEl.offsetHeight;
+    const move = ev => {
+      const h = Math.min(window.innerHeight - 80, Math.max(120, h0 + startY - ev.clientY));
+      termEl.style.setProperty('--term-h', h + 'px');
+    };
+    const up = () => {
+      termEl.classList.remove('sizing');
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      localStorage.setItem('agentboard-term-h', termEl.offsetHeight);
+      if (termActive) termFit(termActive);   // размер сессии — только сейчас
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+  });
+
+  let termResizeT = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(termResizeT);
+    termResizeT = setTimeout(() => termActive && termFit(termActive), 200);
   });
 
   // ---------- карточки ----------
@@ -1708,7 +1883,11 @@
     const a = lastAgents.find(x => x.name === card.dataset.name);
     if (!a) return;
     const act = btn.dataset.act;
-    if (act === 'open') api('open?s=' + encodeURIComponent(a.name));
+    // ⌥ — открыть наперекор настройке: панель есть, но нужен внешний терминал
+    if (act === 'open') {
+      if (termWhere === 'panel' && !e.altKey) openTerm(a.name);
+      else api('open?s=' + encodeURIComponent(a.name));
+    }
     if (act === 'reply') {
       card.classList.toggle('open-in');
       if (card.classList.contains('open-in')) {
@@ -2652,14 +2831,28 @@
       '<button class="po-item po-flex" data-size="' + key + '">' +
       '<span class="po-check">' + (key === cardSize ? '✓' : '') + '</span>' +
       '<span class="t">' + t(str) + '</span></button>').join('');
+    // где открывать сессию по клику: панель снизу или внешний терминал
+    const wheres = [['panel', 'openPanel'], ['external', 'openExternal']];
+    const whereRows = wheres.map(([key, str]) =>
+      '<button class="po-item po-flex" data-where="' + key + '">' +
+      '<span class="po-check">' + (key === termWhere ? '✓' : '') + '</span>' +
+      '<span class="t">' + t(str) + '</span></button>').join('');
     showPopover(x, y, '<div class="po-head">' + t('boardSkin') + '</div>' + rows + appBlock +
                       '<div class="po-head">' + t('cardSize') + '</div>' + sizeRows +
+                      '<div class="po-head">' + t('openWhere') + '</div>' + whereRows +
                       '<div class="po-head">' + t('agents') + '</div>' + provRows +
                       '<div class="po-head">' + t('language') + '</div>' + langRows);
     popover.querySelectorAll('.po-item[data-size]').forEach(btn => {
       btn.onclick = () => {
         applyCardSize(btn.dataset.size, true);
         settingsMenu(x, y);   // перерисовать с галочкой
+      };
+    });
+    popover.querySelectorAll('.po-item[data-where]').forEach(btn => {
+      btn.onclick = () => {
+        termWhere = btn.dataset.where;
+        localStorage.setItem('agentboard-term-where', termWhere);
+        settingsMenu(x, y);
       };
     });
     popover.querySelectorAll('.po-item[data-app]').forEach(btn => {
