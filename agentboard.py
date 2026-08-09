@@ -2103,6 +2103,67 @@ def new_shell(cwd="", app=""):
             "cwd": cwd}
 
 
+# ---------- файлы проекта для боковой панели ----------
+# Корень задаём мы, а не клиент: каталоги проектов доски и живых сессий. Иначе
+# локальный сервер превращается в браузер по всему диску.
+FS_SKIP = {".git", "node_modules", ".venv", "__pycache__", ".DS_Store"}
+
+
+def fs_roots():
+    roots = {os.path.realpath(w["cwd"]) for w in load_board()["workspaces"]}
+    roots |= {os.path.realpath(c["cwd"]) for c in load_board()["cards"] if c.get("cwd")}
+    return {r for r in roots if os.path.isdir(r)}
+
+
+def fs_resolve(root, rel):
+    """Абсолютный путь внутри корня или None. realpath — чтобы симлинк наружу
+    не увёл: проверяем уже разрешённый путь, а не тот, что прислали."""
+    root = os.path.realpath(os.path.expanduser(root or ""))
+    if root not in fs_roots():
+        return None, "root not allowed"
+    p = os.path.realpath(os.path.join(root, rel or ""))
+    if p != root and not p.startswith(root + os.sep):
+        return None, "outside root"
+    return root, p
+
+
+def fs_list(root, rel=""):
+    root, p = fs_resolve(root, rel)
+    if not root:
+        return {"error": p}
+    if not os.path.isdir(p):
+        return {"error": "not a directory"}
+    dirs, files = [], []
+    try:
+        for e in os.scandir(p):
+            if e.name in FS_SKIP or e.name.startswith("."):
+                continue
+            item = {"name": e.name,
+                    "rel": os.path.relpath(os.path.join(p, e.name), root)}
+            if e.is_dir(follow_symlinks=False):
+                dirs.append(item)
+            else:
+                try:
+                    item["size"] = e.stat().st_size
+                except OSError:
+                    item["size"] = 0
+                files.append(item)
+    except OSError as e:
+        return {"error": str(e)}
+    key = lambda i: i["name"].lower()
+    return {"root": root, "rel": os.path.relpath(p, root) if p != root else "",
+            "dirs": sorted(dirs, key=key), "files": sorted(files, key=key)}
+
+
+def fs_open(root, rel):
+    """Открыть файл в том, что назначено системой. Путь — только внутри корня."""
+    root, p = fs_resolve(root, rel)
+    if not root or not os.path.exists(p):
+        return False
+    subprocess.run(["open", p], capture_output=True, timeout=10)
+    return True
+
+
 # ---------- действия ----------
 
 # ---------- каталоги моделей: сами CLI + имена из models.dev ----------
@@ -2845,6 +2906,10 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_term(arg("session"), arg("cols"), arg("rows"))
         elif url.path == "/api/term_new":
             self.send(200, json.dumps(new_shell(arg("cwd"), arg("app"))))
+        elif url.path == "/api/fs":
+            self.send(200, json.dumps(fs_list(arg("root"), arg("rel"))))
+        elif url.path == "/api/fs_open":
+            self.ok(fs_open(arg("root"), arg("rel")))
         elif url.path == "/api/agents":
             self.send(200, json.dumps(get_agents()))
         elif url.path == "/api/history":
