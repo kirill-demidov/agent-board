@@ -686,8 +686,10 @@
   .term-tab.active { color: var(--acc); border-color: var(--acc); }
   .term-tab .x { opacity: 0.5; }
   .term-tab .x:hover { opacity: 1; }
-  #term-plus, #term-close { cursor: pointer; color: #8fa89a; padding: 2px 8px; }
-  #term-plus:hover, #term-close:hover { color: var(--acc); }
+  #term-plus, #term-files, #term-close {
+    cursor: pointer; color: #8fa89a; padding: 2px 8px;
+  }
+  #term-plus:hover, #term-files:hover, #term-close:hover { color: var(--acc); }
   #term-close { margin-left: auto; }
   #term-body { flex: 1 1 auto; min-height: 0; position: relative; }
   .term-view { position: absolute; inset: 0; display: none; }
@@ -968,6 +970,7 @@
   <div id="term">
     <div id="term-grip"></div>
     <div id="term-bar"><span id="term-plus" title="new shell session">+</span>
+      <span id="term-files" title="file manager">▤</span>
       <span id="term-close" title="hide panel (⌃`)">▾</span></div>
     <div id="term-body"></div>
   </div>
@@ -1048,6 +1051,7 @@
       resizeCards: 'drag to resize · double-click to reset',
       openWhere: 'open session in', openPanel: 'bottom panel',
       openExternal: 'external terminal (⌥ click)', termClosed: 'disconnected',
+      termNoApp: 'not installed — opened a shell instead',
       cardSize: 'card size', sizeS: 'compact', sizeM: 'normal',
       sizeL: 'large', sizeXL: 'huge',
       onlyWaitingOff: 'needs you — click to show only these',
@@ -1138,6 +1142,7 @@
       resizeCards: 'потянуть — размер · двойной клик — сброс',
       openWhere: 'сессию открывать', openPanel: 'в панели снизу',
       openExternal: 'во внешнем терминале (⌥ клик)', termClosed: 'отключено',
+      termNoApp: 'не установлен — открыта оболочка',
       cardSize: 'размер карточек', sizeS: 'компактный', sizeM: 'обычный',
       sizeL: 'крупный', sizeXL: 'огромный',
       onlyWaitingOff: 'ждут тебя — нажми, чтобы оставить только их',
@@ -1477,7 +1482,7 @@
     ws.onopen = () => termFit(name);
   }
 
-  function openTerm(name) {
+  function openTerm(name, note) {
     termEl.classList.add('show');
     if (terms[name]) { selectTerm(name); return; }
 
@@ -1531,6 +1536,7 @@
       if (s && s.ws && s.ws.readyState === 1) s.ws.send(new TextEncoder().encode(d));
     });
     selectTerm(name);
+    if (note) term.writeln(note);
     connectTerm(name);
   }
 
@@ -1549,11 +1555,19 @@
     if (e.ctrlKey && e.key === '`') { e.preventDefault(); toggleTerm(); }
   });
 
-  // «+» — обычная оболочка в рабочем каталоге доски, не агент
+  // «+» — обычная оболочка, «▤» — файловый менеджер. Что именно запускать,
+  // решает сервер по своему списку: команду отсюда не передаём.
   termPlusBtn.addEventListener('click', () => newShellTerm());
-  async function newShellTerm() {
-    const r = await api('term_new');
-    if (r && r.session) { termEl.classList.add('show'); openTerm(r.session); }
+  document.getElementById('term-files').addEventListener('click', () => newShellTerm('mc'));
+
+  async function newShellTerm(app) {
+    const r = await api('term_new' + (app ? '?app=' + encodeURIComponent(app) : ''));
+    if (!r || !r.session) return;
+    termEl.classList.add('show');
+    // попросили менеджер, а его нет — открылась оболочка, честно предупреждаем
+    openTerm(r.session, r.asked && !r.app
+      ? '\x1b[33m' + r.asked + ': ' + t('termNoApp') + '\x1b[0m'
+      : '');
   }
 
   // Терминал одевается по скину доски: на светлом macOS и бежевом СССР
