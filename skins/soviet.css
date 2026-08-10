@@ -565,3 +565,6 @@ body.only-waiting::after {
 #fv-foot { border-top: 1px solid #b3a375; }
 /* потерянная вкладка — погасшая лампа на эмали */
 .term-tab.lost { color: #9e3b28; border-color: #9e3b28; background: #d9c9a8; }
+.term-tab .lbl[contenteditable="plaintext-only"] { border-bottom-color: #7a3b28; }
+#popover .sortb { border-color: #8a7a44; color: #5b4f36; }
+#popover .sortb:hover, #popover .sortb.on { color: #7a3b28; border-color: #7a3b28; }

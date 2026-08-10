@@ -2653,23 +2653,29 @@ def _fts_query(q):
     return " ".join('"%s"*' % t for t in toks) if toks else ""
 
 
-def search_history(query, limit=25):
+def search_history(query, limit=25, order="rank"):
+    """order: rank — по релевантности FTS, new/old — по времени разговора.
+
+    Хронологию сортируем в SQL, а не потом: у выборки стоит LIMIT, и досортировка
+    в питоне переставляла бы только самые релевантные, а не самые свежие.
+    """
     match = _fts_query(query)
     if not match or not search_available():
         return []
+    sort = {"new": "ts DESC", "old": "ts ASC"}.get(order, "rank")
     out, seen = [], {}
     try:
         # read-only: индекс чужой, писать в него мы не должны ни при каких условиях
         con = sqlite3.connect(f"file:{HISTORY_DB}?mode=ro", uri=True, timeout=3)
         rows = con.execute(
             "SELECT path, date, project, summary, sig, "
-            "snippet(messages, 7, '‹', '›', ' … ', 16) "
-            "FROM messages WHERE messages MATCH ? ORDER BY rank LIMIT ?",
+            "snippet(messages, 7, '‹', '›', ' … ', 16), ts "
+            f"FROM messages WHERE messages MATCH ? ORDER BY {sort} LIMIT ?",
             (match, int(limit) * 4)).fetchall()
         con.close()
     except sqlite3.Error:
         return []
-    for path, date, proj, summary, sig, snip in rows:
+    for path, date, proj, summary, sig, snip, ts in rows:
         cwd = proj or ""
         sid = os.path.basename(path)[:-6] if path.endswith(".jsonl") else ""
         # открыть можно не всё: в архивной копии свои имена файлов и никакого
@@ -2683,6 +2689,7 @@ def search_history(query, limit=25):
             "cwd": cwd,
             "project": os.path.basename(cwd.rstrip("/")),
             "date": date or "",
+            "ts": ts or "",
             "summary": (summary or "").strip()[:110],
             "snippet": " ".join((snip or "").split())[:220],
             "can_open": can_open,
@@ -2694,7 +2701,11 @@ def search_history(query, limit=25):
         if key in seen:
             prev = seen[key]
             if can_open and not prev["can_open"]:
+                # позицию в хронологии задало первое вхождение — время не трогаем,
+                # иначе строка показывала бы дату другого сообщения того же лога
+                keep = {"ts": prev["ts"], "date": prev["date"]}
                 prev.update(hit)
+                prev.update(keep)
             continue
         seen[key] = hit
         out.append(hit)
@@ -2961,7 +2972,8 @@ class Handler(BaseHTTPRequestHandler):
         elif url.path == "/api/reindex":
             self.send(200, json.dumps({"ran": reindex_history()}))
         elif url.path == "/api/search":
-            self.send(200, json.dumps(search_history(arg("q"), arg("n") or 25)))
+            self.send(200, json.dumps(
+                search_history(arg("q"), arg("n") or 25, arg("order"))))
         elif url.path == "/api/new":
             cwd = arg("cwd")
             self.ok(bool(cwd) and os.path.isdir(cwd)

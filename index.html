@@ -542,7 +542,7 @@
 
   /* ---------- попап ---------- */
   #popover {
-    position: absolute; z-index: 60;
+    position: absolute; z-index: 70;   /* выше панелей: их z-index 55 и 60 */
     min-width: 260px; max-width: 480px;
     background: #101713;
     border: 1px solid #35473c;
@@ -552,6 +552,14 @@
     font-size: 12.5px;
     /* overflow видимый: меню моделей открывается вверх, за границу попапа */
   }
+  #popover .po-sort { float: right; display: flex; gap: 4px; }
+  #popover .sortb {
+    font: inherit; font-size: 10px; text-transform: none; letter-spacing: 0;
+    padding: 1px 6px; border-radius: 5px; cursor: pointer;
+    background: transparent; color: #7f9488; border: 1px solid #2c3a32;
+  }
+  #popover .sortb:hover { color: var(--acc); }
+  #popover .sortb.on { color: var(--acc); border-color: var(--acc); }
   #popover .po-head {
     padding: 8px 12px; color: #8fa398;
     border-bottom: 1px solid #243028;
@@ -749,6 +757,9 @@
   .term-tab.active { color: var(--acc); border-color: var(--acc); }
   .term-tab.lost { color: #c88; border-color: #7a4444; }
   .term-tab.lost .lbl { text-decoration: line-through; opacity: 0.7; }
+  .term-tab .lbl[contenteditable="plaintext-only"] {
+    outline: none; border-bottom: 1px solid var(--acc); min-width: 2ch;
+  }
   .term-tab .x { opacity: 0.5; }
   .term-tab .x:hover { opacity: 1; }
   #term-plus, #term-files, #term-close {
@@ -1056,7 +1067,7 @@
 
   <div id="term">
     <div id="term-grip"></div>
-    <div id="term-bar"><span id="term-plus" class="po-opener" title="new shell session">+</span>
+    <div id="term-bar"><span id="term-plus" class="po-opener" title="new session (double-click a tab to rename)">+</span>
       <span id="term-files" class="po-opener" title="file manager">▤</span>
       <span id="term-close" title="hide panel (⌃`)">▾</span></div>
     <div id="term-body"></div>
@@ -1081,6 +1092,7 @@
       searchPlaceholder: 'search all conversations',
       searchHead: '$N found — click to put on the board',
       searchNone: 'nothing found',
+      sort_rank: 'relevance', sort_new: 'newest', sort_old: 'oldest',
       searchOpen: 'open',
       searchArchive: 'archived',
       searchArchiveTip: 'only in the archived copy — no live transcript to reopen',
@@ -1181,6 +1193,7 @@
       searchPlaceholder: 'поиск по всем разговорам',
       searchHead: 'нашлось $N — клик положит на доску',
       searchNone: 'ничего не найдено',
+      sort_rank: 'по смыслу', sort_new: 'сначала новые', sort_old: 'сначала старые',
       searchOpen: 'открыть',
       searchArchive: 'архив',
       searchArchiveTip: 'есть только в архивной копии — живого транскрипта нет, открывать нечего',
@@ -1668,11 +1681,15 @@
       '<div class="po-list">' + list.map((w, i) =>
         '<button class="po-item po-sess" data-i="' + i + '">' + esc(w.name) +
         '</button>').join('') + '</div>');
+    popover.dataset.owner = 'sideroot';
     popover.querySelectorAll('.po-item[data-i]').forEach(b => {
       b.onclick = () => { hidePopover(); sideLoad(list[+b.dataset.i].cwd, ''); };
     });
   }
-  sideRootEl.addEventListener('click', sideRootMenu);
+  sideRootEl.addEventListener('click', () => {
+    if (popoverOpen('sideroot')) { hidePopover(); return; }
+    sideRootMenu();
+  });
 
   function toggleSide(force) {
     const show = force === undefined ? !sideEl.classList.contains('show') : force;
@@ -1717,6 +1734,11 @@
   // шлём по отпусканию мыши, а не на каждый пиксель: tmux на каждый ресайз
   // перерисовывает TUI агента, и в реальном времени это мельтешит.
   let termWhere = localStorage.getItem('agentboard-term-where') || 'panel';
+  // Свои подписи вкладок. Имя самой tmux-сессии не трогаем: на нём висят файлы
+  // статуса и имени агента, card["tmux"] и attach-строка Warp — rename-session
+  // порвал бы эти связи, и карточка потеряла бы «ждёт тебя».
+  const termNames = JSON.parse(localStorage.getItem('agentboard-term-names') || '{}');
+  const termLabel = n => termNames[n] || n;
   const termEl = document.getElementById('term');
   const termBar = document.getElementById('term-bar');
   const termBody = document.getElementById('term-body');
@@ -1744,7 +1766,11 @@
       s.tab.classList.toggle('active', k === name);
     }
     const s = terms[name];
-    if (s) { termFit(name); s.term.focus(); sideFollow(s.cwd); }
+    if (!s) return;
+    termFit(name);
+    // правят подпись вкладки — фокус чужой, забирать его в терминал нельзя
+    if (!s.tab.querySelector('.lbl').isContentEditable) s.term.focus();
+    sideFollow(s.cwd);
   }
 
   function closeTerm(name) {
@@ -1800,6 +1826,34 @@
     };
   }
 
+  // Подпись правится на месте: попап тут был бы тяжелее самой задачи.
+  // Пусто или прежнее имя сессии — подпись снимается.
+  function renameTermTab(name) {
+    const s = terms[name];
+    if (!s) return;
+    const lbl = s.tab.querySelector('.lbl');
+    if (lbl.isContentEditable) return;
+    const before = lbl.textContent;
+    lbl.contentEditable = 'plaintext-only';
+    lbl.focus();
+    getSelection().selectAllChildren(lbl);
+    const finish = save => {
+      lbl.contentEditable = 'false';
+      const v = lbl.textContent.trim().slice(0, 40);
+      if (!save) { lbl.textContent = before; return; }
+      if (!v || v === name) delete termNames[name];
+      else termNames[name] = v;
+      localStorage.setItem('agentboard-term-names', JSON.stringify(termNames));
+      lbl.textContent = termLabel(name);
+    };
+    lbl.onblur = () => finish(true);
+    lbl.onkeydown = e => {
+      e.stopPropagation();                  // ⌃` и Esc доски тут не при делах
+      if (e.key === 'Enter') { e.preventDefault(); lbl.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); lbl.blur(); }
+    };
+  }
+
   // вкладка потеряла связь и сдалась — вернуть по клику, не переоткрывая
   function reconnectTerm(name) {
     const s = terms[name];
@@ -1835,11 +1889,16 @@
     const tab = document.createElement('span');
     tab.className = 'term-tab';
     tab.innerHTML = '<span class="lbl"></span><span class="x">×</span>';
-    tab.querySelector('.lbl').textContent = name;
+    tab.querySelector('.lbl').textContent = termLabel(name);
+    tab.title = name;                       // настоящее имя сессии — в подсказке
     tab.addEventListener('click', e => {
       if (e.target.classList.contains('x')) { closeTerm(name); return; }
       selectTerm(name);
       if (!terms[name].ws) reconnectTerm(name);  // связь потеряна — вернуть
+    });
+    tab.addEventListener('dblclick', e => {
+      e.preventDefault();
+      renameTermTab(name);
     });
     termBar.insertBefore(tab, termPlusBtn);
 
@@ -1887,8 +1946,16 @@
 
   // «+» — обычная оболочка, «▤» — файловый менеджер. Что именно запускать,
   // решает сервер по своему списку: команду отсюда не передаём.
-  termPlusBtn.addEventListener('click', e => termDirMenu(e, ''));
-  document.getElementById('term-files').addEventListener('click', e => termDirMenu(e, 'mc'));
+  // как у кнопок топбара: повторный клик закрывает, owner помечает «это моё» —
+  // без него общий обработчик pointerdown принимает попап за чужой и прячет
+  termPlusBtn.addEventListener('click', e => {
+    if (popoverOpen('termdir')) { hidePopover(); return; }
+    termDirMenu(e, '');
+  });
+  document.getElementById('term-files').addEventListener('click', e => {
+    if (popoverOpen('termdir')) { hidePopover(); return; }
+    termDirMenu(e, 'mc');
+  });
 
   // Где открывать: домашний каталог редко бывает нужным. Предлагаем проекты
   // доски, каталог активной вкладки и любую папку через нативный диалог.
@@ -1905,6 +1972,7 @@
       '<div class="po-list">' + rows + '</div>' +
       '<button class="po-item" data-home="1">' + t('homeDir') + '</button>' +
       '<button class="po-item" data-other="1">' + t('otherFolder') + '</button>');
+    popover.dataset.owner = 'termdir';
     const go = cwd => { hidePopover(); newShellTerm(app, cwd); };
     popover.querySelectorAll('.po-item[data-i]').forEach(b => {
       b.onclick = () => go(projects[+b.dataset.i].cwd);
@@ -2409,7 +2477,12 @@
     popover.style.left = '0px';
     const left = Math.max(10, Math.min(x - 130, window.innerWidth - popover.offsetWidth - 12));
     popover.style.left = (left + window.scrollX) + 'px';
-    popover.style.top = (y + window.scrollY + 10) + 'px';
+    // вниз, если влезает; иначе вверх — кнопки панели терминала стоят у нижней
+    // кромки, и меню под ними уходило за край окна
+    const h = popover.offsetHeight;
+    const top = (y + 10 + h > window.innerHeight - 8 && y - h - 10 > 8)
+      ? y - h - 10 : y + 10;
+    popover.style.top = (top + window.scrollY) + 'px';
   }
   function hidePopover() {
     popover.style.display = 'none'; popover.dataset.owner = '';
@@ -2758,12 +2831,18 @@
   // Индекс ведёт cc-history; сервер только читает его и говорит, есть ли он.
   const searchBox = document.getElementById('topSearch');
   let searchTimer = null, searchSeq = 0;
+  // порядок выдачи: релевантность или хронология. Сортирует SQL — досортировка
+  // здесь переставляла бы только то, что уже влезло в LIMIT
+  const SEARCH_ORDERS = ['rank', 'new', 'old'];
+  let searchOrder = localStorage.getItem('agentboard-search-order') || 'rank';
+  if (!SEARCH_ORDERS.includes(searchOrder)) searchOrder = 'rank';
 
   async function runSearch() {
     const q = searchBox.value.trim();
     if (q.length < 2) { if (popoverOpen('search')) hidePopover(); return; }
     const seq = ++searchSeq;
-    const hits = await api('search?q=' + encodeURIComponent(q));
+    const hits = await api('search?q=' + encodeURIComponent(q) +
+                           '&order=' + searchOrder);
     if (seq !== searchSeq) return;   // пришёл ответ на устаревший запрос
     const box = searchBox.getBoundingClientRect();
     if (!hits || !hits.length) {
@@ -2772,11 +2851,18 @@
       return;
     }
     showPopover(box.right, 44,
-      '<div class="po-head">' + t('searchHead').replace('$N', hits.length) + '</div>' +
+      '<div class="po-head">' + t('searchHead').replace('$N', hits.length) +
+      '<span class="po-sort">' + SEARCH_ORDERS.map(o =>
+        '<button class="sortb' + (o === searchOrder ? ' on' : '') +
+        '" data-order="' + o + '">' + t('sort_' + o) + '</button>').join('') +
+      '</span></div>' +
       '<div class="po-list">' + hits.map((h, i) =>
         '<div class="po-hit" data-i="' + i + '">' +
         '<span class="h"><b>' + esc(h.project || '?') + '</b>' +
-        '<span>' + esc((h.date || '').slice(0, 10)) + '</span>' +
+        // в хронологии день разговора — главный ориентир, добавляем время
+        '<span>' + esc(searchOrder === 'rank'
+          ? (h.date || '').slice(0, 10)
+          : (h.ts || h.date || '').slice(0, 16).replace('T', ' ')) + '</span>' +
         (h.can_open
           ? '<button class="hit-open" data-i="' + i + '">' + t('searchOpen') +
             '</button>'
@@ -2786,6 +2872,15 @@
         '<span class="s">' + esc(h.snippet).replace(/‹/g, '<mark>')
           .replace(/›/g, '</mark>') + '</span></div>').join('') + '</div>');
     popover.dataset.owner = 'search';
+
+    popover.querySelectorAll('.sortb').forEach(b => {
+      b.onclick = e => {
+        e.stopPropagation();       // клик по кнопке — не выбор разговора
+        searchOrder = b.dataset.order;
+        localStorage.setItem('agentboard-search-order', searchOrder);
+        runSearch();               // порядок задаёт SQL — перезапрашиваем
+      };
+    });
 
     // положить разговор на доску карточкой; open=true — сразу и поднять его
     async function take(h, open) {

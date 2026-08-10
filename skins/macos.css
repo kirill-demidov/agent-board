@@ -715,3 +715,6 @@ html.dark #fv-box { background: #1c1c1e; border-color: rgba(255,255,255,0.12); }
 html.dark #fv-head, html.dark #fv-body { background: #1c1c1e; color: #e5e5ea; }
 .term-tab.lost { color: #d70015; border-color: rgba(215, 0, 21, 0.45); }
 html.dark .term-tab.lost { color: #ff453a; border-color: rgba(255, 69, 58, 0.5); }
+.term-tab .lbl[contenteditable="plaintext-only"] { border-bottom-color: #0a84ff; }
+#popover .sortb { border-color: rgba(0,0,0,0.12); color: #6e6e73; }
+#popover .sortb:hover, #popover .sortb.on { color: #0a84ff; border-color: #0a84ff; }
