@@ -563,3 +563,5 @@ body.only-waiting::after {
 }
 #fv-body { background: #fbf4e2; color: #3b3222; }
 #fv-foot { border-top: 1px solid #b3a375; }
+/* потерянная вкладка — погасшая лампа на эмали */
+.term-tab.lost { color: #9e3b28; border-color: #9e3b28; background: #d9c9a8; }

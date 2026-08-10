@@ -747,6 +747,8 @@
     background: rgba(20,30,24,0.8); white-space: nowrap;
   }
   .term-tab.active { color: var(--acc); border-color: var(--acc); }
+  .term-tab.lost { color: #c88; border-color: #7a4444; }
+  .term-tab.lost .lbl { text-decoration: line-through; opacity: 0.7; }
   .term-tab .x { opacity: 0.5; }
   .term-tab .x:hover { opacity: 1; }
   #term-plus, #term-files, #term-close {
@@ -1046,7 +1048,7 @@
   </div>
 
   <div id="side">
-    <div id="side-head"><span id="side-root" title="switch folder">—</span></div>
+    <div id="side-head"><span id="side-root" class="po-opener" title="switch folder">—</span></div>
     <div id="side-list"></div>
     <div id="side-hint"></div>
     <div id="side-grip"></div>
@@ -1054,8 +1056,8 @@
 
   <div id="term">
     <div id="term-grip"></div>
-    <div id="term-bar"><span id="term-plus" title="new shell session">+</span>
-      <span id="term-files" title="file manager">▤</span>
+    <div id="term-bar"><span id="term-plus" class="po-opener" title="new shell session">+</span>
+      <span id="term-files" class="po-opener" title="file manager">▤</span>
       <span id="term-close" title="hide panel (⌃`)">▾</span></div>
     <div id="term-body"></div>
   </div>
@@ -1137,6 +1139,8 @@
       openWhere: 'open session in', openPanel: 'bottom panel',
       openExternal: 'external terminal (⌥ click)', termClosed: 'disconnected',
       termNoApp: 'not installed — opened a shell instead',
+      termRetry: 'connection lost, retrying in', termRetryNow: 'reconnecting',
+      termBack: 'reconnected', termGaveUp: 'session is gone — click the tab to retry',
       whereOpen: 'open in', sameDir: 'same folder as this tab', homeDir: 'home folder',
       sideHint: 'click — preview · ⌥ click — open in the system',
       sideSent: 'path added to the reply', sideCopied: 'no reply open — path copied',
@@ -1235,6 +1239,8 @@
       openWhere: 'сессию открывать', openPanel: 'в панели снизу',
       openExternal: 'во внешнем терминале (⌥ клик)', termClosed: 'отключено',
       termNoApp: 'не установлен — открыта оболочка',
+      termRetry: 'связь потеряна, повтор через', termRetryNow: 'переподключаюсь',
+      termBack: 'связь восстановлена', termGaveUp: 'сессии нет — клик по вкладке, чтобы повторить',
       whereOpen: 'открыть в', sameDir: 'каталог текущей вкладки', homeDir: 'домашний каталог',
       sideHint: 'клик — посмотреть · ⌥ клик — открыть в системе',
       sideSent: 'путь добавлен в ответ', sideCopied: 'ответ не открыт — путь в буфере',
@@ -1744,6 +1750,8 @@
   function closeTerm(name) {
     const s = terms[name];
     if (!s) return;
+    s.closing = true;           // закрыли руками — не воскрешать
+    clearTimeout(s.retryT);
     if (s.ws) s.ws.close();
     s.term.dispose();
     s.view.remove();
@@ -1754,9 +1762,15 @@
     else { termActive = null; termEl.classList.remove('show'); }
   }
 
+  // Сервер перезапустили или сеть мигнула — вкладка сама возвращается: сессия
+  // живёт в tmux, терять её из-за оборванного сокета незачем. Пауза растёт,
+  // чтобы не молотить сервер, который ещё поднимается.
+  const TERM_RETRY = [500, 1000, 2000, 4000, 8000];
+
   function connectTerm(name) {
     const s = terms[name];
-    if (!s) return;
+    if (!s || s.closing) return;
+    clearTimeout(s.retryT);
     const ws = new WebSocket(location.origin.replace(/^http/, 'ws') +
       '/ws/term?session=' + encodeURIComponent(name) +
       '&cols=' + s.term.cols + '&rows=' + s.term.rows);
@@ -1765,8 +1779,34 @@
     const dec = new TextDecoder();
     ws.onmessage = e => s.term.write(
       typeof e.data === 'string' ? e.data : dec.decode(new Uint8Array(e.data)));
-    ws.onclose = () => { s.ws = null; s.term.write('\r\n\x1b[2m— ' + t('termClosed') + ' —\x1b[0m\r\n'); };
-    ws.onopen = () => termFit(name);
+    ws.onopen = () => {
+      if (s.tries) s.term.write('\r\n\x1b[2m— ' + t('termBack') + ' —\x1b[0m\r\n');
+      s.tries = 0;
+      s.tab.classList.remove('lost');
+      termFit(name);
+    };
+    ws.onclose = () => {
+      s.ws = null;
+      if (s.closing) return;
+      s.tab.classList.add('lost');
+      // сессии больше нет — переподключаться некуда, ждём решения человека
+      if (s.tries >= TERM_RETRY.length) {
+        s.term.write('\r\n\x1b[2m— ' + t('termGaveUp') + ' —\x1b[0m\r\n');
+        return;
+      }
+      const wait = TERM_RETRY[s.tries++];
+      s.term.write('\r\n\x1b[2m— ' + t('termRetry') + ' ' + (wait / 1000) + 's —\x1b[0m\r\n');
+      s.retryT = setTimeout(() => connectTerm(name), wait);
+    };
+  }
+
+  // вкладка потеряла связь и сдалась — вернуть по клику, не переоткрывая
+  function reconnectTerm(name) {
+    const s = terms[name];
+    if (!s || s.ws) return;
+    s.tries = 0;
+    s.term.write('\r\n\x1b[2m— ' + t('termRetryNow') + ' —\x1b[0m\r\n');
+    connectTerm(name);
   }
 
   function openTerm(name, note, cwd) {
@@ -1797,7 +1837,9 @@
     tab.innerHTML = '<span class="lbl"></span><span class="x">×</span>';
     tab.querySelector('.lbl').textContent = name;
     tab.addEventListener('click', e => {
-      if (e.target.classList.contains('x')) closeTerm(name); else selectTerm(name);
+      if (e.target.classList.contains('x')) { closeTerm(name); return; }
+      selectTerm(name);
+      if (!terms[name].ws) reconnectTerm(name);  // связь потеряна — вернуть
     });
     termBar.insertBefore(tab, termPlusBtn);
 
@@ -1816,7 +1858,8 @@
       return true;
     });
 
-    terms[name] = { term, fit, view, tab, ws: null, cwd: cwd || '' };
+    terms[name] = { term, fit, view, tab, ws: null, cwd: cwd || '',
+                    tries: 0, retryT: null, closing: false };
     // ввод — бинарным кадром: управляющие сообщения ходят текстовыми
     term.onData(d => {
       const s = terms[name];
@@ -1937,6 +1980,14 @@
     };
     grip.addEventListener('pointermove', move);
     grip.addEventListener('pointerup', up);
+  });
+
+  // фоновая вкладка браузера не получает таймеров — вернувшись, чиним связь сразу
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    for (const [name, s] of Object.entries(terms)) {
+      if (!s.ws && !s.closing) reconnectTerm(name);
+    }
   });
 
   let termResizeT = null;
@@ -2369,8 +2420,11 @@
   }
   // pointerdown, не click: click приходит после перерисовки попапа,
   // когда нажатая кнопка уже выкинута из DOM — и попап закрывался сам
+  // .po-opener — всё, что само открывает попап: иначе его же клик закрывал бы
+  // только что нарисованное меню (кнопки панели терминала, заголовок боковой)
   document.addEventListener('pointerdown', e => {
-    if (!popover.contains(e.target) && !e.target.closest('.top-btn')) hidePopover();
+    if (!popover.contains(e.target) &&
+        !e.target.closest('.top-btn, .po-opener')) hidePopover();
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') hidePopover(); });
 

@@ -713,3 +713,5 @@ html.dark #side { background: rgba(28,28,30,0.94); border-right-color: rgba(255,
 html.dark .fs-row { color: #e5e5ea; }
 html.dark #fv-box { background: #1c1c1e; border-color: rgba(255,255,255,0.12); }
 html.dark #fv-head, html.dark #fv-body { background: #1c1c1e; color: #e5e5ea; }
+.term-tab.lost { color: #d70015; border-color: rgba(215, 0, 21, 0.45); }
+html.dark .term-tab.lost { color: #ff453a; border-color: rgba(255, 69, 58, 0.5); }
